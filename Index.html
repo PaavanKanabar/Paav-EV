@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Alpha Monitor</title>
+  
+  <!-- iOS PWA Meta Tags -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="apple-touch-icon" href="https://upload.wikimedia.org/wikipedia/commons/dark_grey_square.png">
+
+  <style>
+    :root {
+      --bg: #000000;
+      --surface: #121212;
+      --surface-header: #1C1C1E;
+      --text: #FFFFFF;
+      --text-dim: #8E8E93;
+      --accent: #0A84FF;
+      --up: #30D158;
+      --down: #FF453A;
+    }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+    .header {
+      padding: 16px;
+      background: var(--bg);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      border-bottom: 1px solid #333;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .header h1 { margin: 0; font-size: 14px; font-weight: 700; }
+    .header span { font-size: 12px; color: var(--text-dim); }
+    .category {
+      background: var(--surface-header);
+      padding: 10px 16px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #E5E5EA;
+    }
+    .group-header {
+      background: var(--surface);
+      padding: 8px 16px;
+      display: flex;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-dim);
+      border-bottom: 1px solid #2C2C2E;
+    }
+    .group-title { color: var(--accent); flex: 2; }
+    .col { flex: 1; text-align: right; }
+    .row {
+      display: flex;
+      padding: 12px 16px;
+      border-bottom: 1px solid #1C1C1E;
+      align-items: center;
+      text-decoration: none;
+      color: inherit;
+    }
+    .row:active { background: #1C1C1E; }
+    .ticker { flex: 2; display: flex; flex-direction: column; }
+    .ticker-name { font-size: 14px; font-weight: 600; }
+    .ticker-vol { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+    .price { flex: 1; text-align: right; font-family: "Menlo", monospace; font-size: 13px; color: #D1D1D6; }
+    .ret, .outperf { flex: 1; text-align: right; font-family: "Menlo", monospace; font-size: 13px; font-weight: 600; }
+    .up { color: var(--up); }
+    .down { color: var(--down); }
+    .neutral { color: #48484A; }
+    #loading { padding: 20px; text-align: center; color: var(--text-dim); font-size: 14px; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>HYPERLIQUID DESK</h1>
+    <span>vs 4 PM EST</span>
+  </div>
+  <div id="loading">Syncing order books...</div>
+  <div id="content"></div>
+
+  <script>
+    const url = "https://api.hyperliquid.xyz/info";
+    const DEX_LIST = ["xyz", "para", "mkts", "io", ""];
+
+    const taxonomy = [
+      { category: "MACRO", subgroups: [
+        { name: "Equity Indices & Regional ETFs", tickers: ["US500", "QQQ", "IWM", "JP225", "EWJ", "EWY", "EWT", "KR200", "KORU", "S&P500"] },
+        { name: "Commodities & Energy", tickers: ["NATGAS", "COPPER", "PLATINUM", "PALLADIUM", "XLE", "CL", "WTIOIL", "BRENTOIL", "GOLD", "SILVER"] },
+        { name: "Foreign Exchange (FX)", tickers: ["EURUSD", "GBPUSD", "USDJPY"] },
+        { name: "Rates & Bonds", tickers: ["TLT"] }
+      ]},
+      { category: "THEMATICS", subgroups: [
+        { name: "Semiconductors, Memory & Equipment", tickers: ["NVDA", "AMD", "INTC", "TSM", "ASML", "AVGO", "QCOM", "AMAT", "MU", "WDC", "SKHY", "SKHX", "SNDK", "KIOXIA", "MRVL", "ARM", "CXMT", "SOXL", "SMH", "DRAM"] },
+        { name: "AI Models, Software & Cloud", tickers: ["OPENAI", "ANTH", "MINIMAX", "ZHIPU", "NBIS", "CRWV", "PLTR", "ORCL", "NOW", "CRWD", "BB", "MSFT"] },
+        { name: "Mega-Cap Tech & Platforms", tickers: ["AAPL", "GOOGL", "META", "AMZN", "BABA", "NFLX", "MAGS", "XYZ100"] },
+        { name: "Optics, Hardware & Telecom", tickers: ["AAOI", "LITE", "COHR", "NOK", "DELL", "SAMSUNG", "GOPRO"] },
+        { name: "Robotics", tickers: ["UNITREE", "BOT"] },
+        { name: "Crypto-Equities & On-Chain Builders", tickers: ["MSTR", "COIN", "IREN", "HOOD", "STRC", "PURRDAT", "TREAD", "GIGADEV", "QNT"] },
+        { name: "Auto, Mobility & Space", tickers: ["TSLA", "HYUNDAI", "RKLB", "USAR"] },
+        { name: "Biotech, Consumer & Misc. Equities", tickers: ["LLY", "MRNA", "HIMS", "DKNG", "TTWO", "SOFTBANK", "BE", "CBRS", "CRCL", "RMNR", "SPCX"] }
+      ]}
+    ];
+
+    function formatVolume(val) {
+      if (!val || isNaN(val)) return "$0";
+      let num = parseFloat(val);
+      if (num >= 1e9) return "$" + (num / 1e9).toFixed(1) + "B";
+      if (num >= 1e6) return "$" + (num / 1e6).toFixed(1) + "M";
+      if (num >= 1e3) return "$" + (num / 1e3).toFixed(0) + "K";
+      return "$" + num.toFixed(0);
+    }
+
+    function getLastUSCloseMs() {
+      let now = new Date();
+      for (let daysBack = 0; daysBack < 7; daysBack++) {
+        let testDate = new Date(now.getTime() - (daysBack * 24 * 60 * 60 * 1000));
+        let nyStr = testDate.toLocaleString("en-US", { timeZone: "America/New_York", hour12: false });
+        let [datePart, timePart] = nyStr.split(", ");
+        let [m, d, y] = datePart.split("/");
+        let hr = parseInt(timePart.split(":")[0]);
+        let dayOfWeek = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+        
+        if (daysBack === 0 && hr < 16) continue;
+        if (dayOfWeek === 0 || dayOfWeek === 6) continue;
+        
+        for (let utcHour = 19; utcHour <= 22; utcHour++) {
+           let exactMs = Date.UTC(y, m - 1, d, utcHour, 0, 0);
+           let exactNyHr = parseInt(new Intl.DateTimeFormat("en-US", {timeZone: "America/New_York", hour: "numeric", hour12: false}).format(new Date(exactMs)));
+           if (exactNyHr === 16) return exactMs;
+        }
+      }
+    }
+
+    async function initDashboard() {
+      const lastCloseMs = getLastUSCloseMs();
+      let marketMap = {};
+
+      // 1. Fetch live contexts
+      const fetchDex = async (dex) => {
+        let payload = { type: "metaAndAssetCtxs" };
+        if (dex) payload.dex = dex;
+        try {
+          let res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+          let data = await res.json();
+          if (data && data[0] && data[1]) {
+            let universe = data[0].universe;
+            let ctxs = data[1];
+            for (let i = 0; i < universe.length; i++) {
+              let uName = universe[i].name;
+              let base = uName.includes(":") ? uName.split(":")[1] : uName;
+              let mark = parseFloat(ctxs[i].markPx || 0);
+              let prev = parseFloat(ctxs[i].prevDayPx || mark);
+              
+              let entry = { fullName: uName, baseName: base, livePrice: mark, volume: parseFloat(ctxs[i].dayNtlVlm || 0), rawPct: 0, closePrice: prev };
+              marketMap[uName.toUpperCase()] = entry;
+              marketMap[base.toUpperCase()] = entry;
+            }
+          }
+        } catch(e) {}
+      };
+      
+      await Promise.all(DEX_LIST.map(fetchDex));
+
+      // 2. Fetch 4 PM candles for used tickers
+      let activeKeys = new Set();
+      taxonomy.forEach(s => s.subgroups.forEach(g => g.tickers.forEach(t => activeKeys.add(t.toUpperCase()))));
+      
+      const fetchCandle = async (base) => {
+        let asset = marketMap[base];
+        if (!asset) return;
+        try {
+          let res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+            type: "candleSnapshot", req: { coin: asset.fullName, interval: "15m", startTime: lastCloseMs - (15 * 60 * 1000), endTime: lastCloseMs + (60 * 1000) }
+          })});
+          let hist = await res.json();
+          if (hist && hist.length > 0) {
+            let cPrice = parseFloat(hist[hist.length - 1].c);
+            asset.closePrice = cPrice;
+            asset.rawPct = ((asset.livePrice - cPrice) / cPrice) * 100;
+          }
+        } catch(e) {}
+      };
+
+      await Promise.all(Array.from(activeKeys).map(fetchCandle));
+
+      // 3. Render HTML
+      let html = "";
+      for (let section of taxonomy) {
+        html += `<div class="category">${section.category}</div>`;
+        for (let group of section.subgroups) {
+          let rowData = [];
+          let seen = new Set();
+          
+          for (let sym of group.tickers) {
+            let item = marketMap[sym.toUpperCase()];
+            if (item && !seen.has(item.baseName)) {
+              seen.add(item.baseName);
+              rowData.push(item);
+            }
+          }
+          if (rowData.length === 0) continue;
+          
+          rowData.sort((a, b) => b.volume - a.volume);
+          
+          html += `
+            <div class="group-header">
+              <div class="group-title">${group.name.toUpperCase()}</div>
+              <div class="col">PRICE</div>
+              <div class="col">1x RET</div>
+              <div class="col">OUTPERF</div>
+            </div>
+          `;
+          
+          for (let item of rowData) {
+            let retVal = item.rawPct;
+            let outperfVal = null;
+
+            if (item.baseName === "SOXL") {
+              retVal = item.rawPct / 3;
+              if (marketMap["XYZ100"]) outperfVal = retVal - (marketMap["XYZ100"].rawPct * 2);
+            }
+
+            let rClass = retVal >= 0 ? "up" : "down";
+            let rSign = retVal >= 0 ? "+" : "";
+            
+            let oHtml = `<div class="outperf neutral">—</div>`;
+            if (outperfVal !== null) {
+              let oClass = outperfVal >= 0 ? "up" : "down";
+              let oSign = outperfVal >= 0 ? "+" : "";
+              oHtml = `<div class="outperf ${oClass}">${oSign}${outperfVal.toFixed(2)}%</div>`;
+            }
+
+            let pxStr = item.livePrice >= 1000 ? item.livePrice.toFixed(2).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ",") : (item.livePrice < 10 ? item.livePrice.toFixed(3) : item.livePrice.toFixed(2));
+
+            html += `
+              <a href="https://app.hyperliquid.xyz/trade/${item.fullName}" target="_blank" class="row">
+                <div class="ticker">
+                  <span class="ticker-name">${item.baseName}</span>
+                  <span class="ticker-vol">${formatVolume(item.volume)} 24h</span>
+                </div>
+                <div class="price">$${pxStr}</div>
+                <div class="ret ${rClass}">${rSign}${retVal.toFixed(2)}%</div>
+                ${oHtml}
+              </a>
+            `;
+          }
+        }
+      }
+      
+      document.getElementById("loading").style.display = "none";
+      document.getElementById("content").innerHTML = html;
+    }
+
+    initDashboard();
+  </script>
+</body>
+</html>
