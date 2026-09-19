@@ -91,11 +91,10 @@
 
   <script>
     const url = "https://api.hyperliquid.xyz/info";
-    const wsUrl = "wss://api.hyperliquid.xyz/ws";
     const DEX_LIST = ["xyz", "para", "mkts", "io", ""];
     let marketMap = {};
     let activeKeys = new Set();
-    let isDirty = false; // Flag to trigger UI updates
+    let isDirty = false;
 
     const taxonomy = [
       { category: "MACRO", subgroups: [
@@ -116,7 +115,6 @@
       ]}
     ];
 
-    // Populate activeKeys
     taxonomy.forEach(s => s.subgroups.forEach(g => g.tickers.forEach(t => activeKeys.add(t.toUpperCase()))));
 
     function formatVolume(val) {
@@ -152,7 +150,6 @@
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
     function cacheDOMPointers() {
-      // Store exact DOM elements in memory so we never query the document during live ticks
       for (const key of activeKeys) {
         if (marketMap[key]) {
           marketMap[key].elPx = document.getElementById(`px-${key}`);
@@ -170,7 +167,6 @@
         let item = marketMap[key];
         if (!item || !item.elPx || !item.elRet) continue;
 
-        // Math updates
         if (item.closePrice) {
           item.rawPct = ((item.livePrice - item.closePrice) / item.closePrice) * 100;
         }
@@ -183,7 +179,6 @@
           if (marketMap["XYZ100"]) outperfVal = retVal - (marketMap["XYZ100"].rawPct * 2);
         }
 
-        // DOM Updates
         let pxStr = item.livePrice >= 1000 ? item.livePrice.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",") : (item.livePrice < 10 ? item.livePrice.toFixed(3) : item.livePrice.toFixed(2));
         if (item.elPx.innerText !== `$${pxStr}`) item.elPx.innerText = `$${pxStr}`;
 
@@ -209,46 +204,49 @@
       }
     }
 
-    function connectWebSocket() {
-      const ws = new WebSocket(wsUrl);
-      
-      ws.onopen = () => {
-        ws.send(JSON.stringify({ method: "subscribe", subscription: { type: "allMids" } }));
-      };
-      
-      ws.onmessage = (event) => {
-        const msg = JSON.parse(event.data);
-        if (msg.channel === "allMids" && msg.data && msg.data.mids) {
-          // Iterate through the exchange's payload instead of our taxonomy
-          for (const [coin, markPx] of Object.entries(msg.data.mids)) {
-             let item = marketMap[coin.toUpperCase()];
-             
-             // If the coin exists in our map AND we are tracking it on the UI
-             if (item && item.elPx) { 
-                item.livePrice = parseFloat(markPx);
-                isDirty = true;
-             }
-          }
-        }
-      };
-      
-      ws.onclose = () => setTimeout(connectWebSocket, 1000);
+    // Background Polling Loop for Spot Assets
+    async function pollLivePrices() {
+      while (true) {
+        await sleep(2000); 
+        
+        const fetchDexLive = async (dex) => {
+          let payload = { type: "metaAndAssetCtxs" };
+          if (dex) payload.dex = dex;
+          try {
+            let res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+            let data = await res.json();
+            if (data && data[0] && data[1]) {
+              let universe = data[0].universe;
+              let ctxs = data[1];
+              for (let i = 0; i < universe.length; i++) {
+                let uName = universe[i].name;
+                let mark = parseFloat(ctxs[i].markPx || 0);
+                
+                let item = marketMap[uName.toUpperCase()];
+                if (item && item.elPx && item.livePrice !== mark) {
+                   item.livePrice = mark;
+                   isDirty = true;
+                }
+              }
+            }
+          } catch(e) {}
+        };
+        
+        await Promise.all(DEX_LIST.map(fetchDexLive));
+      }
     }
-
 
     async function initDashboard() {
       const lastCloseMs = getLastUSCloseMs();
       const cacheKey = `hl_close_cache_${lastCloseMs}`;
       let cachedCloses = JSON.parse(localStorage.getItem(cacheKey) || "{}");
       
-      // Clean up old caches from previous days to free memory
       Object.keys(localStorage).forEach(key => {
         if (key.startsWith("hl_close_cache_") && key !== cacheKey) {
           localStorage.removeItem(key);
         }
       });
 
-      // 1. Fetch live contexts (Fast, safe REST call)
       const fetchDex = async (dex) => {
         let payload = { type: "metaAndAssetCtxs" };
         if (dex) payload.dex = dex;
@@ -274,10 +272,7 @@
       
       await Promise.all(DEX_LIST.map(fetchDex));
 
-      // 2. Fetch 4 PM candles (Sequenced with delay, avoiding IP bans)
       let needsCacheUpdate = false;
-      let fetchesCompleted = 0;
-      
       document.getElementById("loading").innerText = "Syncing baselines...";
 
       for (let base of activeKeys) {
@@ -289,7 +284,7 @@
           asset.rawPct = ((asset.livePrice - asset.closePrice) / asset.closePrice) * 100;
         } else {
           try {
-            await sleep(50); // 50ms delay between requests protects against HTTP 429 Rate Limits
+            await sleep(50);
             let res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
               type: "candleSnapshot", req: { coin: asset.fullName, interval: "15m", startTime: lastCloseMs - (15 * 60 * 1000), endTime: lastCloseMs + (60 * 1000) }
             })});
@@ -309,7 +304,6 @@
          localStorage.setItem(cacheKey, JSON.stringify(cachedCloses));
       }
 
-      // 3. Render Initial HTML
       let html = "";
       for (let section of taxonomy) {
         html += `<div class="category">${section.category}</div>`;
@@ -356,16 +350,14 @@
       document.getElementById("loading").style.display = "none";
       document.getElementById("content").innerHTML = html;
 
-      // 4. Cache pointers & start loops
       cacheDOMPointers();
-      isDirty = true; // Force first paint
+      isDirty = true; 
       flushUpdatesToDOM();
 
-      // Start the 1-second UI throttle
       setInterval(flushUpdatesToDOM, 1000);
-
-      // Connect real-time pricing
-      connectWebSocket();
+      
+      // Start the background poller instead of WS
+      pollLivePrices();
     }
 
     initDashboard();
