@@ -91,6 +91,7 @@
 
   <script>
     const url = "https://api.hyperliquid.xyz/info";
+    const wsUrl = "wss://api.hyperliquid.xyz/ws";
     const DEX_LIST = ["xyz", "para", "mkts", "io", ""];
     let marketMap = {};
     let activeKeys = new Set();
@@ -174,6 +175,7 @@
         let retVal = item.rawPct;
         let outperfVal = null;
 
+        // Custom SOXL logic
         if (item.baseName === "SOXL") {
           retVal = item.rawPct / 3;
           if (marketMap["XYZ100"]) outperfVal = retVal - (marketMap["XYZ100"].rawPct * 2);
@@ -204,36 +206,50 @@
       }
     }
 
-    // Background Polling Loop for Spot Assets
-    async function pollLivePrices() {
-      while (true) {
-        await sleep(2000); 
+    // Direct L2 Orderbook Websocket
+    function connectWebSocket() {
+      const ws = new WebSocket(wsUrl);
+      
+      ws.onopen = async () => {
+        let coinsToSub = new Set();
+        // Collect the full system names (e.g. "xyz:NVDA", "@QQQ") for active tickers
+        for (const key of activeKeys) {
+           let item = marketMap[key];
+           if (item && item.fullName) {
+               coinsToSub.add(item.fullName);
+           }
+        }
         
-        const fetchDexLive = async (dex) => {
-          let payload = { type: "metaAndAssetCtxs" };
-          if (dex) payload.dex = dex;
-          try {
-            let res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-            let data = await res.json();
-            if (data && data[0] && data[1]) {
-              let universe = data[0].universe;
-              let ctxs = data[1];
-              for (let i = 0; i < universe.length; i++) {
-                let uName = universe[i].name;
-                let mark = parseFloat(ctxs[i].markPx || 0);
-                
-                let item = marketMap[uName.toUpperCase()];
-                if (item && item.elPx && item.livePrice !== mark) {
-                   item.livePrice = mark;
+        // Subscribe to l2Book for each ticker with a tiny stagger to respect WS limits
+        for (const coin of coinsToSub) {
+            ws.send(JSON.stringify({ method: "subscribe", subscription: { type: "l2Book", coin: coin } }));
+            await sleep(10); 
+        }
+      };
+      
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        // Intercept Orderbook Updates
+        if (msg.channel === "l2Book" && msg.data) {
+           const coin = msg.data.coin;
+           const levels = msg.data.levels;
+           
+           // Ensure the book has both a bid and an ask
+           if (levels && levels[0] && levels[1] && levels[0].length > 0 && levels[1].length > 0) {
+               const bestBid = parseFloat(levels[0][0].px);
+               const bestAsk = parseFloat(levels[1][0].px);
+               const mid = (bestBid + bestAsk) / 2;
+               
+               let item = marketMap[coin.toUpperCase()];
+               if (item && item.elPx && item.livePrice !== mid) {
+                   item.livePrice = mid;
                    isDirty = true;
-                }
-              }
-            }
-          } catch(e) {}
-        };
-        
-        await Promise.all(DEX_LIST.map(fetchDexLive));
-      }
+               }
+           }
+        }
+      };
+      
+      ws.onclose = () => setTimeout(connectWebSocket, 1000);
     }
 
     async function initDashboard() {
@@ -241,12 +257,14 @@
       const cacheKey = `hl_close_cache_${lastCloseMs}`;
       let cachedCloses = JSON.parse(localStorage.getItem(cacheKey) || "{}");
       
+      // Memory cleanup for old caches
       Object.keys(localStorage).forEach(key => {
         if (key.startsWith("hl_close_cache_") && key !== cacheKey) {
           localStorage.removeItem(key);
         }
       });
 
+      // 1. Initial REST fetch for system names and 24h volumes
       const fetchDex = async (dex) => {
         let payload = { type: "metaAndAssetCtxs" };
         if (dex) payload.dex = dex;
@@ -272,6 +290,7 @@
       
       await Promise.all(DEX_LIST.map(fetchDex));
 
+      // 2. Fetch or load 4 PM Baselines
       let needsCacheUpdate = false;
       document.getElementById("loading").innerText = "Syncing baselines...";
 
@@ -304,6 +323,7 @@
          localStorage.setItem(cacheKey, JSON.stringify(cachedCloses));
       }
 
+      // 3. Render DOM
       let html = "";
       for (let section of taxonomy) {
         html += `<div class="category">${section.category}</div>`;
@@ -350,14 +370,13 @@
       document.getElementById("loading").style.display = "none";
       document.getElementById("content").innerHTML = html;
 
+      // 4. Start the engine
       cacheDOMPointers();
       isDirty = true; 
       flushUpdatesToDOM();
 
       setInterval(flushUpdatesToDOM, 1000);
-      
-      // Start the background poller instead of WS
-      pollLivePrices();
+      connectWebSocket();
     }
 
     initDashboard();
