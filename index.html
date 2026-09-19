@@ -2,7 +2,6 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <!-- Added viewport-fit=cover for iPhone edge-to-edge display -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Alpha Monitor</title>
   
@@ -27,12 +26,10 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       margin: 0;
       padding: 0;
-      /* Pad the bottom to clear the iOS home indicator */
       padding-bottom: env(safe-area-inset-bottom);
       -webkit-font-smoothing: antialiased;
     }
     .header {
-      /* Dynamic Island clearance via safe-area-inset-top */
       padding: max(16px, env(safe-area-inset-top)) 16px 16px 16px;
       background: var(--bg);
       position: sticky;
@@ -97,6 +94,8 @@
     const wsUrl = "wss://api.hyperliquid.xyz/ws";
     const DEX_LIST = ["xyz", "para", "mkts", "io", ""];
     let marketMap = {};
+    let activeKeys = new Set();
+    let isDirty = false; // Flag to trigger UI updates
 
     const taxonomy = [
       { category: "MACRO", subgroups: [
@@ -116,6 +115,9 @@
         { name: "Biotech, Consumer & Misc. Equities", tickers: ["LLY", "MRNA", "HIMS", "DKNG", "TTWO", "SOFTBANK", "BE", "CBRS", "CRCL", "RMNR", "SPCX"] }
       ]}
     ];
+
+    // Populate activeKeys
+    taxonomy.forEach(s => s.subgroups.forEach(g => g.tickers.forEach(t => activeKeys.add(t.toUpperCase()))));
 
     function formatVolume(val) {
       if (!val || isNaN(val)) return "$0";
@@ -147,37 +149,62 @@
       }
     }
 
-    function updateRowDOM(item) {
-      const pxEl = document.getElementById(`px-${item.baseName}`);
-      const retEl = document.getElementById(`ret-${item.baseName}`);
-      if (!pxEl || !retEl) return;
+    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-      let pxStr = item.livePrice >= 1000 ? item.livePrice.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",") : (item.livePrice < 10 ? item.livePrice.toFixed(3) : item.livePrice.toFixed(2));
-      pxEl.innerText = `$${pxStr}`;
-
-      let retVal = item.rawPct;
-      let outperfVal = null;
-
-      if (item.baseName === "SOXL") {
-        retVal = item.rawPct / 3;
-        if (marketMap["XYZ100"]) outperfVal = retVal - (marketMap["XYZ100"].rawPct * 2);
+    function cacheDOMPointers() {
+      // Store exact DOM elements in memory so we never query the document during live ticks
+      for (const key of activeKeys) {
+        if (marketMap[key]) {
+          marketMap[key].elPx = document.getElementById(`px-${key}`);
+          marketMap[key].elRet = document.getElementById(`ret-${key}`);
+          marketMap[key].elOutperf = document.getElementById(`outperf-${key}`);
+        }
       }
+    }
 
-      let rClass = retVal >= 0 ? "up" : "down";
-      let rSign = retVal >= 0 ? "+" : "";
-      retEl.className = `ret ${rClass}`;
-      retEl.innerText = `${rSign}${retVal.toFixed(2)}%`;
+    function flushUpdatesToDOM() {
+      if (!isDirty) return;
+      isDirty = false;
 
-      const outperfEl = document.getElementById(`outperf-${item.baseName}`);
-      if (outperfEl) {
-        if (outperfVal !== null) {
-          let oClass = outperfVal >= 0 ? "up" : "down";
-          let oSign = outperfVal >= 0 ? "+" : "";
-          outperfEl.className = `outperf ${oClass}`;
-          outperfEl.innerText = `${oSign}${outperfVal.toFixed(2)}%`;
-        } else {
-          outperfEl.className = `outperf neutral`;
-          outperfEl.innerText = `—`;
+      for (const key of activeKeys) {
+        let item = marketMap[key];
+        if (!item || !item.elPx || !item.elRet) continue;
+
+        // Math updates
+        if (item.closePrice) {
+          item.rawPct = ((item.livePrice - item.closePrice) / item.closePrice) * 100;
+        }
+
+        let retVal = item.rawPct;
+        let outperfVal = null;
+
+        if (item.baseName === "SOXL") {
+          retVal = item.rawPct / 3;
+          if (marketMap["XYZ100"]) outperfVal = retVal - (marketMap["XYZ100"].rawPct * 2);
+        }
+
+        // DOM Updates
+        let pxStr = item.livePrice >= 1000 ? item.livePrice.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",") : (item.livePrice < 10 ? item.livePrice.toFixed(3) : item.livePrice.toFixed(2));
+        if (item.elPx.innerText !== `$${pxStr}`) item.elPx.innerText = `$${pxStr}`;
+
+        let rClass = retVal >= 0 ? "up" : "down";
+        let rSign = retVal >= 0 ? "+" : "";
+        let rStr = `${rSign}${retVal.toFixed(2)}%`;
+        if (item.elRet.innerText !== rStr) {
+          item.elRet.className = `ret ${rClass}`;
+          item.elRet.innerText = rStr;
+        }
+
+        if (item.elOutperf) {
+          if (outperfVal !== null) {
+            let oClass = outperfVal >= 0 ? "up" : "down";
+            let oSign = outperfVal >= 0 ? "+" : "";
+            let oStr = `${oSign}${outperfVal.toFixed(2)}%`;
+            if (item.elOutperf.innerText !== oStr) {
+               item.elOutperf.className = `outperf ${oClass}`;
+               item.elOutperf.innerText = oStr;
+            }
+          }
         }
       }
     }
@@ -192,31 +219,32 @@
       ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
         if (msg.channel === "allMids" && msg.data && msg.data.mids) {
-          for (const [coin, markPx] of Object.entries(msg.data.mids)) {
-            let item = marketMap[coin];
-            if (item) {
-              item.livePrice = parseFloat(markPx);
-              if (item.closePrice) {
-                item.rawPct = ((item.livePrice - item.closePrice) / item.closePrice) * 100;
-              }
-              updateRowDOM(item);
-            }
+          // Loop our active keys, NOT the entire exchange dictionary
+          for (const key of activeKeys) {
+             if (msg.data.mids[key]) {
+                marketMap[key].livePrice = parseFloat(msg.data.mids[key]);
+                isDirty = true;
+             }
           }
-          // Force update SOXL since its outperformance relies on XYZ100 which may have just ticked
-          if (marketMap["SOXL"]) updateRowDOM(marketMap["SOXL"]);
         }
       };
       
-      ws.onclose = () => {
-        // Auto-reconnect if Safari drops the connection while backgrounded
-        setTimeout(connectWebSocket, 1000);
-      };
+      ws.onclose = () => setTimeout(connectWebSocket, 1000);
     }
 
     async function initDashboard() {
       const lastCloseMs = getLastUSCloseMs();
+      const cacheKey = `hl_close_cache_${lastCloseMs}`;
+      let cachedCloses = JSON.parse(localStorage.getItem(cacheKey) || "{}");
+      
+      // Clean up old caches from previous days to free memory
+      Object.keys(localStorage).forEach(key => {
+        if (key.startsWith("hl_close_cache_") && key !== cacheKey) {
+          localStorage.removeItem(key);
+        }
+      });
 
-      // 1. Fetch live contexts (initial volume and names)
+      // 1. Fetch live contexts (Fast, safe REST call)
       const fetchDex = async (dex) => {
         let payload = { type: "metaAndAssetCtxs" };
         if (dex) payload.dex = dex;
@@ -242,29 +270,42 @@
       
       await Promise.all(DEX_LIST.map(fetchDex));
 
-      // 2. Fetch 4 PM candles
-      let activeKeys = new Set();
-      taxonomy.forEach(s => s.subgroups.forEach(g => g.tickers.forEach(t => activeKeys.add(t.toUpperCase()))));
+      // 2. Fetch 4 PM candles (Sequenced with delay, avoiding IP bans)
+      let needsCacheUpdate = false;
+      let fetchesCompleted = 0;
       
-      const fetchCandle = async (base) => {
+      document.getElementById("loading").innerText = "Syncing baselines...";
+
+      for (let base of activeKeys) {
         let asset = marketMap[base];
-        if (!asset) return;
-        try {
-          let res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-            type: "candleSnapshot", req: { coin: asset.fullName, interval: "15m", startTime: lastCloseMs - (15 * 60 * 1000), endTime: lastCloseMs + (60 * 1000) }
-          })});
-          let hist = await res.json();
-          if (hist && hist.length > 0) {
-            let cPrice = parseFloat(hist[hist.length - 1].c);
-            asset.closePrice = cPrice;
-            asset.rawPct = ((asset.livePrice - cPrice) / cPrice) * 100;
-          }
-        } catch(e) {}
-      };
+        if (!asset) continue;
 
-      await Promise.all(Array.from(activeKeys).map(fetchCandle));
+        if (cachedCloses[base]) {
+          asset.closePrice = cachedCloses[base];
+          asset.rawPct = ((asset.livePrice - asset.closePrice) / asset.closePrice) * 100;
+        } else {
+          try {
+            await sleep(50); // 50ms delay between requests protects against HTTP 429 Rate Limits
+            let res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+              type: "candleSnapshot", req: { coin: asset.fullName, interval: "15m", startTime: lastCloseMs - (15 * 60 * 1000), endTime: lastCloseMs + (60 * 1000) }
+            })});
+            let hist = await res.json();
+            if (hist && hist.length > 0) {
+              let cPrice = parseFloat(hist[hist.length - 1].c);
+              asset.closePrice = cPrice;
+              asset.rawPct = ((asset.livePrice - cPrice) / cPrice) * 100;
+              cachedCloses[base] = cPrice;
+              needsCacheUpdate = true;
+            }
+          } catch(e) { console.error("Rate limited or error on:", base); }
+        }
+      }
 
-      // 3. Render HTML
+      if (needsCacheUpdate) {
+         localStorage.setItem(cacheKey, JSON.stringify(cachedCloses));
+      }
+
+      // 3. Render Initial HTML
       let html = "";
       for (let section of taxonomy) {
         html += `<div class="category">${section.category}</div>`;
@@ -293,35 +334,15 @@
           `;
           
           for (let item of rowData) {
-            let retVal = item.rawPct;
-            let outperfVal = null;
-
-            if (item.baseName === "SOXL") {
-              retVal = item.rawPct / 3;
-              if (marketMap["XYZ100"]) outperfVal = retVal - (marketMap["XYZ100"].rawPct * 2);
-            }
-
-            let rClass = retVal >= 0 ? "up" : "down";
-            let rSign = retVal >= 0 ? "+" : "";
-            
-            let oHtml = `<div class="outperf neutral" id="outperf-${item.baseName}">—</div>`;
-            if (outperfVal !== null) {
-              let oClass = outperfVal >= 0 ? "up" : "down";
-              let oSign = outperfVal >= 0 ? "+" : "";
-              oHtml = `<div class="outperf ${oClass}" id="outperf-${item.baseName}">${oSign}${outperfVal.toFixed(2)}%</div>`;
-            }
-
-            let pxStr = item.livePrice >= 1000 ? item.livePrice.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",") : (item.livePrice < 10 ? item.livePrice.toFixed(3) : item.livePrice.toFixed(2));
-
             html += `
               <a href="https://app.hyperliquid.xyz/trade/${item.fullName}" target="_blank" class="row">
                 <div class="ticker">
                   <span class="ticker-name">${item.baseName}</span>
                   <span class="ticker-vol">${formatVolume(item.volume)} 24h</span>
                 </div>
-                <div class="price" id="px-${item.baseName}">$${pxStr}</div>
-                <div class="ret ${rClass}" id="ret-${item.baseName}">${rSign}${retVal.toFixed(2)}%</div>
-                ${oHtml}
+                <div class="price" id="px-${item.baseName}">-</div>
+                <div class="ret" id="ret-${item.baseName}">-</div>
+                <div class="outperf" id="outperf-${item.baseName}">-</div>
               </a>
             `;
           }
@@ -331,7 +352,15 @@
       document.getElementById("loading").style.display = "none";
       document.getElementById("content").innerHTML = html;
 
-      // 4. Connect to WebSockets for live pricing
+      // 4. Cache pointers & start loops
+      cacheDOMPointers();
+      isDirty = true; // Force first paint
+      flushUpdatesToDOM();
+
+      // Start the 1-second UI throttle
+      setInterval(flushUpdatesToDOM, 1000);
+
+      // Connect real-time pricing
       connectWebSocket();
     }
 
