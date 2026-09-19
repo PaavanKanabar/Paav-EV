@@ -14,6 +14,7 @@
       --bg: #000000;
       --surface: #121212;
       --surface-header: #1C1C1E;
+      --surface-card: #2C2C2E;
       --text: #FFFFFF;
       --text-dim: #8E8E93;
       --accent: #0A84FF;
@@ -28,7 +29,12 @@
       padding: 0;
       padding-bottom: env(safe-area-inset-bottom);
       -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
     }
+    /* Main View Styles */
+    #main-view { display: block; }
+    #detail-view { display: none; min-height: 100vh; background: var(--bg); }
+    
     .header {
       padding: max(16px, env(safe-area-inset-top)) 16px 16px 16px;
       background: var(--bg);
@@ -40,35 +46,18 @@
       justify-content: space-between;
       align-items: center;
     }
+    .header-nav { display: flex; align-items: center; gap: 10px; }
+    .back-btn { color: var(--accent); font-size: 16px; cursor: pointer; display: flex; align-items: center; }
     .header h1 { margin: 0; font-size: 14px; font-weight: 700; }
     .header span { font-size: 12px; color: var(--text-dim); }
-    .category {
-      background: var(--surface-header);
-      padding: 10px 16px;
-      font-size: 13px;
-      font-weight: 700;
-      color: #E5E5EA;
-    }
-    .group-header {
-      background: var(--surface);
-      padding: 8px 16px;
-      display: flex;
-      font-size: 10px;
-      font-weight: 700;
-      color: var(--text-dim);
-      border-bottom: 1px solid #2C2C2E;
-    }
+    
+    .category { background: var(--surface-header); padding: 10px 16px; font-size: 13px; font-weight: 700; color: #E5E5EA; }
+    .group-header { background: var(--surface); padding: 8px 16px; display: flex; font-size: 10px; font-weight: 700; color: var(--text-dim); border-bottom: 1px solid #2C2C2E; }
     .group-title { color: var(--accent); flex: 2; }
     .col { flex: 1; text-align: right; }
-    .row {
-      display: flex;
-      padding: 12px 16px;
-      border-bottom: 1px solid #1C1C1E;
-      align-items: center;
-      text-decoration: none;
-      color: inherit;
-    }
+    .row { display: flex; padding: 12px 16px; border-bottom: 1px solid #1C1C1E; align-items: center; text-decoration: none; color: inherit; cursor: pointer; }
     .row:active { background: #1C1C1E; }
+    
     .ticker { flex: 2; display: flex; flex-direction: column; }
     .ticker-name { font-size: 14px; font-weight: 600; }
     .ticker-vol { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
@@ -78,16 +67,97 @@
     .down { color: var(--down); }
     .neutral { color: #48484A; }
     #loading { padding: 20px; text-align: center; color: var(--text-dim); font-size: 14px; }
+
+    /* Detail View Specific Styles */
+    .detail-section { padding: 16px; border-bottom: 1px solid #1C1C1E; }
+    .detail-title { font-size: 12px; font-weight: 700; color: var(--text-dim); margin-bottom: 12px; text-transform: uppercase; }
+    
+    .macro-strip { display: flex; gap: 12px; }
+    .macro-card { flex: 1; background: var(--surface); padding: 12px; border-radius: 8px; border: 1px solid var(--surface-card); }
+    .macro-card-title { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; font-weight: 600; }
+    .macro-card-val { font-family: "Menlo", monospace; font-size: 16px; font-weight: 700; }
+
+    .basis-card { background: var(--surface); border: 1px solid var(--surface-card); border-radius: 8px; padding: 16px; text-align: center; }
+    .basis-label { font-size: 12px; color: var(--text-dim); font-weight: 600; margin-bottom: 8px; }
+    .basis-spread { font-family: "Menlo", monospace; font-size: 32px; font-weight: 700; margin-bottom: 8px; }
+    .basis-sub { font-size: 12px; color: #D1D1D6; }
+
+    .imbalance-container { display: flex; height: 8px; width: 100%; border-radius: 4px; overflow: hidden; margin-top: 8px; background: #333; }
+    .imb-bid { background: var(--up); height: 100%; transition: width 0.2s ease-out; }
+    .imb-ask { background: var(--down); height: 100%; transition: width 0.2s ease-out; }
+    .imbalance-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-dim); margin-top: 4px; font-family: "Menlo", monospace; }
+
   </style>
 </head>
 <body>
 
-  <div class="header">
-    <h1>HYPERLIQUID DESK</h1>
-    <span>vs 4 PM EST</span>
+  <!-- MAIN LIST VIEW -->
+  <div id="main-view">
+    <div class="header">
+      <h1>HYPERLIQUID DESK</h1>
+      <span>vs 4 PM EST</span>
+    </div>
+    <div id="loading">Syncing order books...</div>
+    <div id="content"></div>
   </div>
-  <div id="loading">Syncing order books...</div>
-  <div id="content"></div>
+
+  <!-- SOXL DETAIL VIEW -->
+  <div id="detail-view">
+    <div class="header">
+      <div class="header-nav">
+        <div class="back-btn" onclick="closeDetail()">‹ Back</div>
+        <h1>SOXL ANALYSIS</h1>
+      </div>
+      <span>Live Delta</span>
+    </div>
+    
+    <div class="detail-section">
+      <div class="detail-title">Macro Context</div>
+      <div class="macro-strip">
+        <div class="macro-card">
+          <div class="macro-card-title">NASDAQ (XYZ100)</div>
+          <div class="macro-card-val neutral" id="dt-xyz100">-</div>
+        </div>
+        <div class="macro-card">
+          <div class="macro-card-title">S&P 500 (US500)</div>
+          <div class="macro-card-val neutral" id="dt-us500">-</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-title">Basis (Rich/Cheap Monitor)</div>
+      <div class="basis-card">
+        <div class="basis-label">SOXL vs 3x SMH SPREAD</div>
+        <div class="basis-spread neutral" id="dt-basis">0.00%</div>
+        <div class="basis-sub">
+          SOXL: <span id="dt-soxl-ret" style="font-family: Menlo">0.00%</span> | 
+          Implied (SMH × 3): <span id="dt-smh-implied" style="font-family: Menlo">0.00%</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-title">L2 Microstructure (Top 5 Levels)</div>
+      <div class="basis-card" style="padding: 12px;">
+        <div class="imbalance-container">
+          <div class="imb-bid" id="dt-bid-bar" style="width: 50%;"></div>
+          <div class="imb-ask" id="dt-ask-bar" style="width: 50%;"></div>
+        </div>
+        <div class="imbalance-labels">
+          <span id="dt-bid-sz">Bids: 0</span>
+          <span id="dt-ask-sz">Asks: 0</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-title">Index Heavyweights</div>
+      <div id="heavyweights-list">
+        <!-- Injected by JS -->
+      </div>
+    </div>
+  </div>
 
   <script>
     const url = "https://api.hyperliquid.xyz/info";
@@ -96,25 +166,24 @@
     let marketMap = {};
     let activeKeys = new Set();
     let isDirty = false;
+    let currentView = "main"; // 'main' or 'soxl'
+    
+    // L2 Imbalance state for SOXL
+    let soxlL2 = { bidSz: 0, askSz: 0 };
 
     const taxonomy = [
       { category: "MACRO", subgroups: [
-        { name: "Equity Indices & Regional ETFs", tickers: ["US500", "QQQ", "IWM", "JP225", "EWJ", "EWY", "EWT", "KR200", "KORU", "S&P500"] },
-        { name: "Commodities & Energy", tickers: ["NATGAS", "COPPER", "PLATINUM", "PALLADIUM", "XLE", "CL", "WTIOIL", "BRENTOIL", "GOLD", "SILVER"] },
-        { name: "Foreign Exchange (FX)", tickers: ["EURUSD", "GBPUSD", "USDJPY"] },
-        { name: "Rates & Bonds", tickers: ["TLT"] }
+        { name: "Equity Indices", tickers: ["US500", "QQQ", "IWM", "XYZ100"] },
+        { name: "Commodities & Rates", tickers: ["NATGAS", "COPPER", "CL", "WTIOIL", "GOLD", "TLT"] }
       ]},
       { category: "THEMATICS", subgroups: [
-        { name: "Semiconductors, Memory & Equipment", tickers: ["NVDA", "AMD", "INTC", "TSM", "ASML", "AVGO", "QCOM", "AMAT", "MU", "WDC", "SKHY", "SKHX", "SNDK", "KIOXIA", "MRVL", "ARM", "CXMT", "SOXL", "SMH", "DRAM"] },
-        { name: "AI Models, Software & Cloud", tickers: ["OPENAI", "ANTH", "MINIMAX", "ZHIPU", "NBIS", "CRWV", "PLTR", "ORCL", "NOW", "CRWD", "BB", "MSFT"] },
-        { name: "Mega-Cap Tech & Platforms", tickers: ["AAPL", "GOOGL", "META", "AMZN", "BABA", "NFLX", "MAGS", "XYZ100"] },
-        { name: "Optics, Hardware & Telecom", tickers: ["AAOI", "LITE", "COHR", "NOK", "DELL", "SAMSUNG", "GOPRO"] },
-        { name: "Robotics", tickers: ["UNITREE", "BOT"] },
-        { name: "Crypto-Equities & On-Chain Builders", tickers: ["MSTR", "COIN", "IREN", "HOOD", "STRC", "PURRDAT", "TREAD", "GIGADEV", "QNT"] },
-        { name: "Auto, Mobility & Space", tickers: ["TSLA", "HYUNDAI", "RKLB", "USAR"] },
-        { name: "Biotech, Consumer & Misc. Equities", tickers: ["LLY", "MRNA", "HIMS", "DKNG", "TTWO", "SOFTBANK", "BE", "CBRS", "CRCL", "RMNR", "SPCX"] }
+        { name: "Semiconductors & Equipment", tickers: ["NVDA", "AMD", "TSM", "ASML", "AVGO", "QCOM", "AMAT", "MU", "SOXL", "SMH"] },
+        { name: "AI & Mega-Cap Tech", tickers: ["AAPL", "GOOGL", "META", "AMZN", "MSFT", "PLTR"] },
+        { name: "Crypto & On-Chain", tickers: ["MSTR", "COIN", "IREN", "HOOD"] }
       ]}
     ];
+
+    const hwTickers = ["NVDA", "TSM", "AVGO", "AMD", "ASML", "QCOM", "AMAT"];
 
     taxonomy.forEach(s => s.subgroups.forEach(g => g.tickers.forEach(t => activeKeys.add(t.toUpperCase()))));
 
@@ -156,71 +225,152 @@
           marketMap[key].elPx = document.getElementById(`px-${key}`);
           marketMap[key].elRet = document.getElementById(`ret-${key}`);
           marketMap[key].elOutperf = document.getElementById(`outperf-${key}`);
+          marketMap[key].elDtPx = document.getElementById(`dt-px-${key}`);
+          marketMap[key].elDtRet = document.getElementById(`dt-ret-${key}`);
         }
       }
     }
 
+    // Navigation Functions
+    function openSoxlView(e) {
+      if (e) e.preventDefault();
+      document.getElementById("main-view").style.display = "none";
+      document.getElementById("detail-view").style.display = "block";
+      currentView = "soxl";
+      isDirty = true;
+      flushUpdatesToDOM();
+      window.scrollTo(0,0);
+    }
+
+    function closeDetail() {
+      document.getElementById("detail-view").style.display = "none";
+      document.getElementById("main-view").style.display = "block";
+      currentView = "main";
+      isDirty = true;
+      flushUpdatesToDOM();
+    }
+
+    // Handles writing the numbers to the DOM
     function flushUpdatesToDOM() {
       if (!isDirty) return;
       isDirty = false;
 
+      // Update math for all tracking assets
       for (const key of activeKeys) {
         let item = marketMap[key];
-        if (!item || !item.elPx || !item.elRet) continue;
-
+        if (!item) continue;
         if (item.closePrice) {
           item.rawPct = ((item.livePrice - item.closePrice) / item.closePrice) * 100;
         }
+      }
 
-        let retVal = item.rawPct;
-        let outperfVal = null;
+      if (currentView === "main") {
+        for (const key of activeKeys) {
+          let item = marketMap[key];
+          if (!item || !item.elPx || !item.elRet) continue;
+          
+          let retVal = item.rawPct;
+          let outperfVal = null;
+          if (item.baseName === "SOXL") {
+            retVal = item.rawPct / 3;
+            if (marketMap["XYZ100"]) outperfVal = retVal - (marketMap["XYZ100"].rawPct * 2);
+          }
 
-        // Custom SOXL logic
-        if (item.baseName === "SOXL") {
-          retVal = item.rawPct / 3;
-          if (marketMap["XYZ100"]) outperfVal = retVal - (marketMap["XYZ100"].rawPct * 2);
-        }
+          let pxStr = item.livePrice >= 1000 ? item.livePrice.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",") : (item.livePrice < 10 ? item.livePrice.toFixed(3) : item.livePrice.toFixed(2));
+          if (item.elPx.innerText !== `$${pxStr}`) item.elPx.innerText = `$${pxStr}`;
 
-        let pxStr = item.livePrice >= 1000 ? item.livePrice.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",") : (item.livePrice < 10 ? item.livePrice.toFixed(3) : item.livePrice.toFixed(2));
-        if (item.elPx.innerText !== `$${pxStr}`) item.elPx.innerText = `$${pxStr}`;
+          let rClass = retVal >= 0 ? "up" : "down";
+          let rSign = retVal >= 0 ? "+" : "";
+          let rStr = `${rSign}${retVal.toFixed(2)}%`;
+          if (item.elRet.innerText !== rStr) {
+            item.elRet.className = `ret ${rClass}`;
+            item.elRet.innerText = rStr;
+          }
 
-        let rClass = retVal >= 0 ? "up" : "down";
-        let rSign = retVal >= 0 ? "+" : "";
-        let rStr = `${rSign}${retVal.toFixed(2)}%`;
-        if (item.elRet.innerText !== rStr) {
-          item.elRet.className = `ret ${rClass}`;
-          item.elRet.innerText = rStr;
-        }
-
-        if (item.elOutperf) {
-          if (outperfVal !== null) {
-            let oClass = outperfVal >= 0 ? "up" : "down";
-            let oSign = outperfVal >= 0 ? "+" : "";
-            let oStr = `${oSign}${outperfVal.toFixed(2)}%`;
-            if (item.elOutperf.innerText !== oStr) {
-               item.elOutperf.className = `outperf ${oClass}`;
-               item.elOutperf.innerText = oStr;
+          if (item.elOutperf) {
+            if (outperfVal !== null) {
+              let oClass = outperfVal >= 0 ? "up" : "down";
+              let oSign = outperfVal >= 0 ? "+" : "";
+              item.elOutperf.className = `outperf ${oClass}`;
+              item.elOutperf.innerText = `${oSign}${outperfVal.toFixed(2)}%`;
             }
           }
         }
+      } 
+      else if (currentView === "soxl") {
+        // Macro Strip
+        let macroKeys = ["XYZ100", "US500"];
+        macroKeys.forEach(k => {
+          let m = marketMap[k];
+          if (m) {
+            let el = document.getElementById(`dt-${k.toLowerCase()}`);
+            let cls = m.rawPct >= 0 ? "up" : "down";
+            let sgn = m.rawPct >= 0 ? "+" : "";
+            el.className = `macro-card-val ${cls}`;
+            el.innerText = `${sgn}${m.rawPct.toFixed(2)}%`;
+          }
+        });
+
+        // Basis Math (SOXL vs 3x SMH)
+        let soxl = marketMap["SOXL"];
+        let smh = marketMap["SMH"];
+        
+        if (soxl && smh) {
+           let soxlAct = soxl.rawPct;
+           let smhImplied = smh.rawPct * 3;
+           let basis = soxlAct - smhImplied; // Positive = Rich (Premium), Negative = Cheap (Discount)
+
+           let bsEl = document.getElementById("dt-basis");
+           let bsCls = basis > 0.15 ? "down" : (basis < -0.15 ? "up" : "neutral"); // >15bps diff
+           let bsSgn = basis >= 0 ? "+" : "";
+           
+           bsEl.className = `basis-spread ${bsCls}`;
+           bsEl.innerText = `${bsSgn}${basis.toFixed(2)}%`;
+
+           document.getElementById("dt-soxl-ret").innerText = `${soxlAct >= 0 ? '+' : ''}${soxlAct.toFixed(2)}%`;
+           document.getElementById("dt-smh-implied").innerText = `${smhImplied >= 0 ? '+' : ''}${smhImplied.toFixed(2)}%`;
+        }
+
+        // Imbalance Bar
+        let totalSz = soxlL2.bidSz + soxlL2.askSz;
+        if (totalSz > 0) {
+           let bidPct = (soxlL2.bidSz / totalSz) * 100;
+           let askPct = (soxlL2.askSz / totalSz) * 100;
+           document.getElementById("dt-bid-bar").style.width = `${bidPct}%`;
+           document.getElementById("dt-ask-bar").style.width = `${askPct}%`;
+           document.getElementById("dt-bid-sz").innerText = `Bids: ${soxlL2.bidSz.toFixed(0)}`;
+           document.getElementById("dt-ask-sz").innerText = `Asks: ${soxlL2.askSz.toFixed(0)}`;
+        }
+
+        // Heavyweights List
+        hwTickers.forEach(k => {
+           let item = marketMap[k];
+           if (item && item.elDtPx && item.elDtRet) {
+              let pxStr = item.livePrice >= 1000 ? item.livePrice.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",") : (item.livePrice < 10 ? item.livePrice.toFixed(3) : item.livePrice.toFixed(2));
+              let rClass = item.rawPct >= 0 ? "up" : "down";
+              let rSign = item.rawPct >= 0 ? "+" : "";
+              
+              if(item.elDtPx.innerText !== `$${pxStr}`) item.elDtPx.innerText = `$${pxStr}`;
+              let rStr = `${rSign}${item.rawPct.toFixed(2)}%`;
+              if(item.elDtRet.innerText !== rStr) {
+                 item.elDtRet.className = `ret ${rClass}`;
+                 item.elDtRet.innerText = rStr;
+              }
+           }
+        });
       }
     }
 
-    // Direct L2 Orderbook Websocket
     function connectWebSocket() {
       const ws = new WebSocket(wsUrl);
       
       ws.onopen = async () => {
         let coinsToSub = new Set();
-        // Collect the full system names (e.g. "xyz:NVDA", "@QQQ") for active tickers
         for (const key of activeKeys) {
            let item = marketMap[key];
-           if (item && item.fullName) {
-               coinsToSub.add(item.fullName);
-           }
+           if (item && item.fullName) coinsToSub.add(item.fullName);
         }
         
-        // Subscribe to l2Book for each ticker with a tiny stagger to respect WS limits
         for (const coin of coinsToSub) {
             ws.send(JSON.stringify({ method: "subscribe", subscription: { type: "l2Book", coin: coin } }));
             await sleep(10); 
@@ -229,26 +379,37 @@
       
       ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
-        // Intercept Orderbook Updates
         if (msg.channel === "l2Book" && msg.data) {
            const coin = msg.data.coin;
            const levels = msg.data.levels;
            
-           // Ensure the book has both a bid and an ask
            if (levels && levels[0] && levels[1] && levels[0].length > 0 && levels[1].length > 0) {
                const bestBid = parseFloat(levels[0][0].px);
                const bestAsk = parseFloat(levels[1][0].px);
                const mid = (bestBid + bestAsk) / 2;
                
-               let item = marketMap[coin.toUpperCase()];
-               if (item && item.elPx && item.livePrice !== mid) {
+               let baseName = coin.includes(":") ? coin.split(":")[1] : coin;
+               let item = marketMap[baseName.toUpperCase()];
+               
+               if (item && item.livePrice !== mid) {
                    item.livePrice = mid;
                    isDirty = true;
+               }
+
+               // Capture SOXL order book imbalance (Top 5 levels)
+               if (baseName.toUpperCase() === "SOXL") {
+                  let bSz = 0; let aSz = 0;
+                  for(let i=0; i<Math.min(5, levels[0].length); i++) bSz += parseFloat(levels[0][i].sz);
+                  for(let i=0; i<Math.min(5, levels[1].length); i++) aSz += parseFloat(levels[1][i].sz);
+                  if (soxlL2.bidSz !== bSz || soxlL2.askSz !== aSz) {
+                     soxlL2.bidSz = bSz;
+                     soxlL2.askSz = aSz;
+                     isDirty = true;
+                  }
                }
            }
         }
       };
-      
       ws.onclose = () => setTimeout(connectWebSocket, 1000);
     }
 
@@ -257,14 +418,10 @@
       const cacheKey = `hl_close_cache_${lastCloseMs}`;
       let cachedCloses = JSON.parse(localStorage.getItem(cacheKey) || "{}");
       
-      // Memory cleanup for old caches
       Object.keys(localStorage).forEach(key => {
-        if (key.startsWith("hl_close_cache_") && key !== cacheKey) {
-          localStorage.removeItem(key);
-        }
+        if (key.startsWith("hl_close_cache_") && key !== cacheKey) localStorage.removeItem(key);
       });
 
-      // 1. Initial REST fetch for system names and 24h volumes
       const fetchDex = async (dex) => {
         let payload = { type: "metaAndAssetCtxs" };
         if (dex) payload.dex = dex;
@@ -279,7 +436,6 @@
               let base = uName.includes(":") ? uName.split(":")[1] : uName;
               let mark = parseFloat(ctxs[i].markPx || 0);
               let prev = parseFloat(ctxs[i].prevDayPx || mark);
-              
               let entry = { fullName: uName, baseName: base, livePrice: mark, volume: parseFloat(ctxs[i].dayNtlVlm || 0), rawPct: 0, closePrice: prev };
               marketMap[uName.toUpperCase()] = entry;
               marketMap[base.toUpperCase()] = entry;
@@ -290,14 +446,12 @@
       
       await Promise.all(DEX_LIST.map(fetchDex));
 
-      // 2. Fetch or load 4 PM Baselines
       let needsCacheUpdate = false;
       document.getElementById("loading").innerText = "Syncing baselines...";
 
       for (let base of activeKeys) {
         let asset = marketMap[base];
         if (!asset) continue;
-
         if (cachedCloses[base]) {
           asset.closePrice = cachedCloses[base];
           asset.rawPct = ((asset.livePrice - asset.closePrice) / asset.closePrice) * 100;
@@ -315,34 +469,27 @@
               cachedCloses[base] = cPrice;
               needsCacheUpdate = true;
             }
-          } catch(e) { console.error("Rate limited or error on:", base); }
+          } catch(e) {}
         }
       }
 
-      if (needsCacheUpdate) {
-         localStorage.setItem(cacheKey, JSON.stringify(cachedCloses));
-      }
+      if (needsCacheUpdate) localStorage.setItem(cacheKey, JSON.stringify(cachedCloses));
 
-      // 3. Render DOM
-      let html = "";
+      // Build Main View
+      let mainHtml = "";
       for (let section of taxonomy) {
-        html += `<div class="category">${section.category}</div>`;
+        mainHtml += `<div class="category">${section.category}</div>`;
         for (let group of section.subgroups) {
           let rowData = [];
           let seen = new Set();
-          
           for (let sym of group.tickers) {
             let item = marketMap[sym.toUpperCase()];
-            if (item && !seen.has(item.baseName)) {
-              seen.add(item.baseName);
-              rowData.push(item);
-            }
+            if (item && !seen.has(item.baseName)) { seen.add(item.baseName); rowData.push(item); }
           }
           if (rowData.length === 0) continue;
-          
           rowData.sort((a, b) => b.volume - a.volume);
           
-          html += `
+          mainHtml += `
             <div class="group-header">
               <div class="group-title">${group.name.toUpperCase()}</div>
               <div class="col">PRICE</div>
@@ -352,8 +499,12 @@
           `;
           
           for (let item of rowData) {
-            html += `
-              <a href="https://app.hyperliquid.xyz/trade/${item.fullName}" target="_blank" class="row">
+            // If SOXL, trigger the detail view overlay instead of linking out
+            let onClickAction = item.baseName === "SOXL" ? `onclick="openSoxlView(event)"` : `href="https://app.hyperliquid.xyz/trade/${item.fullName}" target="_blank"`;
+            let tag = item.baseName === "SOXL" ? "div" : "a";
+            
+            mainHtml += `
+              <${tag} ${onClickAction} class="row">
                 <div class="ticker">
                   <span class="ticker-name">${item.baseName}</span>
                   <span class="ticker-vol">${formatVolume(item.volume)} 24h</span>
@@ -361,20 +512,34 @@
                 <div class="price" id="px-${item.baseName}">-</div>
                 <div class="ret" id="ret-${item.baseName}">-</div>
                 <div class="outperf" id="outperf-${item.baseName}">-</div>
-              </a>
+              </${tag}>
             `;
           }
         }
       }
       
       document.getElementById("loading").style.display = "none";
-      document.getElementById("content").innerHTML = html;
+      document.getElementById("content").innerHTML = mainHtml;
 
-      // 4. Start the engine
+      // Build Heavyweights List for Detail View
+      let hwHtml = "";
+      hwTickers.forEach(k => {
+         let item = marketMap[k];
+         if (item) {
+             hwHtml += `
+              <a href="https://app.hyperliquid.xyz/trade/${item.fullName}" target="_blank" class="row">
+                <div class="ticker"><span class="ticker-name">${item.baseName}</span></div>
+                <div class="price" id="dt-px-${item.baseName}">-</div>
+                <div class="ret" id="dt-ret-${item.baseName}">-</div>
+              </a>
+             `;
+         }
+      });
+      document.getElementById("heavyweights-list").innerHTML = hwHtml;
+
       cacheDOMPointers();
       isDirty = true; 
       flushUpdatesToDOM();
-
       setInterval(flushUpdatesToDOM, 1000);
       connectWebSocket();
     }
