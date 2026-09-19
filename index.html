@@ -219,10 +219,13 @@
       ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
         if (msg.channel === "allMids" && msg.data && msg.data.mids) {
-          // Loop our active keys, NOT the entire exchange dictionary
-          for (const key of activeKeys) {
-             if (msg.data.mids[key]) {
-                marketMap[key].livePrice = parseFloat(msg.data.mids[key]);
+          // Iterate through the exchange's payload instead of our taxonomy
+          for (const [coin, markPx] of Object.entries(msg.data.mids)) {
+             let item = marketMap[coin.toUpperCase()];
+             
+             // If the coin exists in our map AND we are tracking it on the UI
+             if (item && item.elPx) { 
+                item.livePrice = parseFloat(markPx);
                 isDirty = true;
              }
           }
@@ -231,6 +234,7 @@
       
       ws.onclose = () => setTimeout(connectWebSocket, 1000);
     }
+
 
     async function initDashboard() {
       const lastCloseMs = getLastUSCloseMs();
