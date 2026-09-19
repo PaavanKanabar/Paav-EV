@@ -31,7 +31,6 @@
       -webkit-font-smoothing: antialiased;
       overflow-x: hidden;
     }
-    /* Main View Styles */
     #main-view { display: block; }
     #detail-view { display: none; min-height: 100vh; background: var(--bg); }
     
@@ -68,7 +67,6 @@
     .neutral { color: #48484A; }
     #loading { padding: 20px; text-align: center; color: var(--text-dim); font-size: 14px; }
 
-    /* Detail View Specific Styles */
     .detail-section { padding: 16px; border-bottom: 1px solid #1C1C1E; }
     .detail-title { font-size: 12px; font-weight: 700; color: var(--text-dim); margin-bottom: 12px; text-transform: uppercase; }
     
@@ -80,13 +78,12 @@
     .basis-card { background: var(--surface); border: 1px solid var(--surface-card); border-radius: 8px; padding: 16px; text-align: center; }
     .basis-label { font-size: 12px; color: var(--text-dim); font-weight: 600; margin-bottom: 8px; }
     .basis-spread { font-family: "Menlo", monospace; font-size: 32px; font-weight: 700; margin-bottom: 8px; }
-    .basis-sub { font-size: 12px; color: #D1D1D6; }
-
+    .basis-sub { font-size: 12px; color: #D1D1D6; margin-bottom: 4px; }
+    
     .imbalance-container { display: flex; height: 8px; width: 100%; border-radius: 4px; overflow: hidden; margin-top: 8px; background: #333; }
     .imb-bid { background: var(--up); height: 100%; transition: width 0.2s ease-out; }
     .imb-ask { background: var(--down); height: 100%; transition: width 0.2s ease-out; }
     .imbalance-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-dim); margin-top: 4px; font-family: "Menlo", monospace; }
-
   </style>
 </head>
 <body>
@@ -134,6 +131,9 @@
           Live Mid: <span id="dt-soxl-live" style="font-family: Menlo">-</span> | 
           Oracle (Fair Value): <span id="dt-soxl-oracle" style="font-family: Menlo">-</span>
         </div>
+        <div class="basis-sub">
+          Return vs 4 PM: <span id="dt-soxl-ret-close" style="font-family: Menlo; font-weight: 600;">-</span>
+        </div>
       </div>
     </div>
 
@@ -168,7 +168,6 @@
     let isDirty = false;
     let currentView = "main"; 
     
-    // L2 Imbalance state for SOXL
     let soxlL2 = { bidSz: 0, askSz: 0 };
 
     const taxonomy = [
@@ -307,7 +306,6 @@
           }
         });
 
-        // Updated Basis Math: Live Price vs Oracle
         let soxl = marketMap["SOXL"];
         
         if (soxl && soxl.oraclePrice) {
@@ -322,6 +320,12 @@
 
            document.getElementById("dt-soxl-live").innerText = `$${soxl.livePrice.toFixed(2)}`;
            document.getElementById("dt-soxl-oracle").innerText = `$${soxl.oraclePrice.toFixed(2)}`;
+           
+           let rClass = soxl.rawPct >= 0 ? "var(--up)" : "var(--down)";
+           let rSign = soxl.rawPct >= 0 ? "+" : "";
+           let retEl = document.getElementById("dt-soxl-ret-close");
+           retEl.innerText = `${rSign}${soxl.rawPct.toFixed(2)}%`;
+           retEl.style.color = rClass;
         }
 
         let totalSz = soxlL2.bidSz + soxlL2.askSz;
@@ -403,10 +407,9 @@
       ws.onclose = () => setTimeout(connectWebSocket, 1000);
     }
 
-    // New Background Poller specifically to keep Oracle Prices updated
     async function pollOraclePrices() {
       while (true) {
-        await sleep(5000); // Polling every 5 seconds is plenty for oracle updates
+        await sleep(5000); 
         const fetchDexOracle = async (dex) => {
           let payload = { type: "metaAndAssetCtxs" };
           if (dex) payload.dex = dex;
@@ -441,7 +444,6 @@
         if (key.startsWith("hl_close_cache_") && key !== cacheKey) localStorage.removeItem(key);
       });
 
-      // Added oraclePrice parsing to the initial fetch
       const fetchDex = async (dex) => {
         let payload = { type: "metaAndAssetCtxs" };
         if (dex) payload.dex = dex;
