@@ -79,6 +79,7 @@
     .basis-label { font-size: 12px; color: var(--text-dim); font-weight: 600; margin-bottom: 8px; }
     .basis-spread { font-family: "Menlo", monospace; font-size: 32px; font-weight: 700; margin-bottom: 8px; }
     .basis-sub { font-size: 12px; color: #D1D1D6; margin-bottom: 4px; }
+    .basis-divider { margin: 12px 0; border-top: 1px solid #333; }
     
     .imbalance-container { display: flex; height: 8px; width: 100%; border-radius: 4px; overflow: hidden; margin-top: 8px; background: #333; }
     .imb-bid { background: var(--up); height: 100%; transition: width 0.2s ease-out; }
@@ -125,14 +126,19 @@
     <div class="detail-section">
       <div class="detail-title">Basis (Rich/Cheap Monitor)</div>
       <div class="basis-card">
-        <div class="basis-label">SOXL vs ORACLE SPREAD</div>
+        <div class="basis-label">UNLEV SOXL vs MODEL SPREAD</div>
         <div class="basis-spread neutral" id="dt-basis">0.00%</div>
         <div class="basis-sub">
-          Live Mid: <span id="dt-soxl-live" style="font-family: Menlo">-</span> | 
-          Oracle (Fair Value): <span id="dt-soxl-oracle" style="font-family: Menlo">-</span>
+          Unlev SOXL (Ret/3): <span id="dt-soxl-unlev" style="font-family: Menlo">-</span> | 
+          Model (XYZ100 × 2): <span id="dt-model-unlev" style="font-family: Menlo">-</span>
         </div>
+        <div class="basis-divider"></div>
         <div class="basis-sub">
-          Return vs 4 PM: <span id="dt-soxl-ret-close" style="font-family: Menlo; font-weight: 600;">-</span>
+          Live Mid: <span id="dt-soxl-live" style="font-family: Menlo">-</span> | 
+          4 PM Snap: <span id="dt-soxl-snap" style="font-family: Menlo">-</span>
+        </div>
+        <div class="basis-sub" style="margin-top: 4px;">
+          Raw 3x Return vs Snap: <span id="dt-soxl-ret-close" style="font-family: Menlo; font-weight: 600;">-</span>
         </div>
       </div>
     </div>
@@ -306,10 +312,14 @@
           }
         });
 
+        // Calculate Unleveraged Return vs Unleveraged Model
         let soxl = marketMap["SOXL"];
+        let xyz100 = marketMap["XYZ100"];
         
-        if (soxl && soxl.oraclePrice) {
-           let basis = ((soxl.livePrice / soxl.oraclePrice) - 1) * 100;
+        if (soxl && xyz100) {
+           let unlevSoxl = soxl.rawPct / 3;
+           let unlevModel = xyz100.rawPct * 2;
+           let basis = unlevSoxl - unlevModel;
 
            let bsEl = document.getElementById("dt-basis");
            let bsCls = basis > 0.15 ? "down" : (basis < -0.15 ? "up" : "neutral"); 
@@ -318,8 +328,13 @@
            bsEl.className = `basis-spread ${bsCls}`;
            bsEl.innerText = `${bsSgn}${basis.toFixed(2)}%`;
 
+           document.getElementById("dt-soxl-unlev").innerText = `${unlevSoxl >= 0 ? '+' : ''}${unlevSoxl.toFixed(2)}%`;
+           document.getElementById("dt-model-unlev").innerText = `${unlevModel >= 0 ? '+' : ''}${unlevModel.toFixed(2)}%`;
+           
            document.getElementById("dt-soxl-live").innerText = `$${soxl.livePrice.toFixed(2)}`;
-           document.getElementById("dt-soxl-oracle").innerText = `$${soxl.oraclePrice.toFixed(2)}`;
+           if (soxl.closePrice) {
+              document.getElementById("dt-soxl-snap").innerText = `$${soxl.closePrice.toFixed(2)}`;
+           }
            
            let rClass = soxl.rawPct >= 0 ? "var(--up)" : "var(--down)";
            let rSign = soxl.rawPct >= 0 ? "+" : "";
