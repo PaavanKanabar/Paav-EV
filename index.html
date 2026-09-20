@@ -148,29 +148,29 @@
     <div id="content"></div>
   </div>
 
-  <!-- SOXL DETAIL VIEW -->
+  <!-- PAIR DETAIL VIEW (shared by every entry in PAIRS) -->
   <div id="detail-view">
     <div class="header">
       <div class="header-nav">
         <div class="back-btn" onclick="closeDetail()">‹ Back</div>
-        <h1>SOXL ANALYSIS</h1>
+        <h1 id="dt-title">ANALYSIS</h1>
       </div>
       <div class="status-wrap">
         <div class="status-line"><span class="dot" id="dot-dt"></span><span id="conn-dt">connecting…</span></div>
         <div class="status-sub" id="base-dt">vs 4 PM EST</div>
       </div>
     </div>
-    
+
     <div class="detail-section">
       <div class="detail-title">Macro Context</div>
       <div class="macro-strip">
         <div class="macro-card">
-          <div class="macro-card-title">NASDAQ (XYZ100)</div>
-          <div class="macro-card-val neutral" id="dt-xyz100">-</div>
+          <div class="macro-card-title" id="dt-macro-0-title">-</div>
+          <div class="macro-card-val neutral" id="dt-macro-0-val">-</div>
         </div>
         <div class="macro-card">
-          <div class="macro-card-title">S&P 500 (US500)</div>
-          <div class="macro-card-val neutral" id="dt-us500">-</div>
+          <div class="macro-card-title" id="dt-macro-1-title">-</div>
+          <div class="macro-card-val neutral" id="dt-macro-1-val">-</div>
         </div>
       </div>
     </div>
@@ -178,27 +178,29 @@
     <div class="detail-section">
       <div class="detail-title">Basis (Rich/Cheap Monitor)</div>
       <div class="basis-card" onclick="openModelView()" style="cursor: pointer;">
-        <div class="basis-label">UNLEV SOXL vs MODEL SPREAD <span style="color: var(--accent); font-weight: 700;">· history ›</span></div>
+        <div class="basis-label"><span id="dt-basis-label">-</span> <span style="color: var(--accent); font-weight: 700;">· history ›</span></div>
         <div class="basis-spread neutral" id="dt-basis">0.00%</div>
         <div class="basis-sub">
-          Unlev SOXL (Ret/3): <span id="dt-soxl-unlev" style="font-family: Menlo">-</span> | 
-          Model (XYZ100 × 2): <span id="dt-model-unlev" style="font-family: Menlo">-</span>
+          <span id="dt-tgt-label">-</span>: <span id="dt-tgt-ret" style="font-family: Menlo">-</span> |
+          <span id="dt-model-label">-</span>: <span id="dt-model-ret" style="font-family: Menlo">-</span>
         </div>
         <div class="basis-divider"></div>
         <div class="basis-sub">
-          Live Mid: <span id="dt-soxl-live" style="font-family: Menlo">-</span> | 
-          4 PM Snap: <span id="dt-soxl-snap" style="font-family: Menlo">-</span>
+          Live Mid: <span id="dt-live" style="font-family: Menlo">-</span> |
+          4 PM Snap: <span id="dt-snap" style="font-family: Menlo">-</span>
         </div>
-        <div class="basis-sub" style="margin-top: 4px;">
-          Raw 3x Return vs Snap: <span id="dt-soxl-ret-close" style="font-family: Menlo; font-weight: 600;">-</span>
+        <div class="basis-sub" style="margin-top: 4px;" id="dt-raw-row">
+          <span id="dt-raw-label">-</span>: <span id="dt-ret-close" style="font-family: Menlo; font-weight: 600;">-</span>
         </div>
+        <div class="basis-meta" id="dt-perp">-</div>
         <div class="basis-meta" id="dt-quality">-</div>
         <div class="basis-flag" id="dt-flag" style="display: none;"></div>
+        <div class="basis-meta"><a id="dt-trade" href="#" target="_blank" onclick="event.stopPropagation()" style="color: var(--accent); text-decoration: none; font-weight: 600;">open on Hyperliquid ›</a></div>
       </div>
     </div>
 
     <div class="detail-section">
-      <div class="detail-title">L2 Microstructure (Top 5 Levels)</div>
+      <div class="detail-title" id="dt-book-title">L2 Microstructure (Top 5 Levels)</div>
       <div class="basis-card" style="padding: 12px;">
         <div class="imbalance-container">
           <div class="imb-bid" id="dt-bid-bar" style="width: 50%;"></div>
@@ -212,9 +214,9 @@
     </div>
 
     <div class="detail-section">
-      <div class="detail-title">Index Heavyweights</div>
+      <div class="detail-title" id="dt-heavies-title">Index Heavyweights</div>
       <div id="heavyweights-list">
-        <!-- Injected by JS -->
+        <!-- Injected by JS, rebuilt per pair on open -->
       </div>
     </div>
   </div>
@@ -227,8 +229,8 @@
         <h1>MODEL ERROR</h1>
       </div>
       <div class="status-wrap">
-        <div class="status-line"><span style="color: var(--text-dim)">SOXL/3 − XYZ100×2</span></div>
-        <div class="status-sub" id="mv-range">–</div>
+        <div class="status-line"><span class="dot" id="dot-mv"></span><span id="conn-mv">connecting…</span></div>
+        <div class="status-sub"><span id="mv-formula">–</span> · <span id="mv-range">–</span></div>
       </div>
     </div>
 
@@ -237,7 +239,7 @@
       <div class="stat-grid">
         <div class="stat"><div class="stat-k">Error now</div><div class="stat-v" id="mv-now">–</div></div>
         <div class="stat"><div class="stat-k">σ this hour</div><div class="stat-v" id="mv-signow">–</div></div>
-        <div class="stat"><div class="stat-k">z-score</div><div class="stat-v" id="mv-z">–</div></div>
+        <div class="stat"><div class="stat-k">× daily σ</div><div class="stat-v" id="mv-z">–</div></div>
       </div>
     </div>
 
@@ -255,14 +257,14 @@
     </div>
 
     <div class="detail-section">
-      <div class="detail-title">Daily unlevered error, close → close</div>
+      <div class="detail-title" id="mv-bars-title">Daily error, close → close</div>
       <div class="chart-wrap" id="mv-bars-wrap">
         <svg class="chart" id="mv-bars" viewBox="0 0 340 150" preserveAspectRatio="xMidYMid meet"></svg>
         <div class="tip" id="mv-tip2"></div>
       </div>
       <div class="legend">
-        <span><i style="background: #FF453A"></i>SOXL rich (err &gt; 0)</span>
-        <span><i style="background: #199E70"></i>SOXL cheap (err &lt; 0)</span>
+        <span><i style="background: #FF453A"></i><span id="mv-lg-rich">rich</span> (err &gt; 0)</span>
+        <span><i style="background: #199E70"></i><span id="mv-lg-cheap">cheap</span> (err &lt; 0)</span>
       </div>
       <div class="chart-note" id="mv-bars-note">–</div>
     </div>
@@ -272,10 +274,10 @@
       <div class="stat-grid">
         <div class="stat"><div class="stat-k">n days</div><div class="stat-v" id="mv-n">–</div></div>
         <div class="stat"><div class="stat-k">mean err</div><div class="stat-v" id="mv-mean">–</div></div>
-        <div class="stat"><div class="stat-k">σ full day</div><div class="stat-v" id="mv-sigma">–</div></div>
+        <div class="stat"><div class="stat-k">σ 1-day</div><div class="stat-v" id="mv-sigma">–</div></div>
         <div class="stat"><div class="stat-k">fitted β</div><div class="stat-v" id="mv-beta">–</div></div>
         <div class="stat"><div class="stat-k">R²</div><div class="stat-v" id="mv-r2">–</div></div>
-        <div class="stat"><div class="stat-k">β vs 2.0</div><div class="stat-v" id="mv-btest">–</div></div>
+        <div class="stat"><div class="stat-k" id="mv-btest-k">β vs –</div><div class="stat-v" id="mv-btest">–</div></div>
       </div>
       <div class="chart-note" id="mv-diag-note">–</div>
       <div class="toggle-tbl" id="mv-tbl-toggle" onclick="toggleModelTable()">Show data table ›</div>
@@ -290,40 +292,145 @@
 
     const CANDLE_MS = 15 * 60 * 1000;
     const CACHE_PREFIX = "hl_close_v2_";   // v2: v1 caches hold the wrong (16:15) baseline
-    const BASIS_THRESHOLD_PCT = 0.15;
-    const SPREAD_WARN_BPS = 15;            // book wider than the signal can't resolve the signal
     const STALE_WARN_MS = 60 * 1000;
     const STALE_BAD_MS = 5 * 60 * 1000;
     const WS_PING_MS = 30 * 1000;          // HL closes idle sockets ~60s
     const WS_WATCHDOG_MS = 45 * 1000;
+
+    // Every tradeable pair the dashboard knows about. The detail view and the model-error
+    // view are generic and share one set of DOM nodes; adding a pair here is the only edit
+    // needed to get both views for it.
+    //
+    //   err = r_target / lev  -  beta * r_bench      (per rebalance period)
+    //
+    // lev is the target's structural leverage (SOXL resets to 3x at every NAV strike), so the
+    // divide is a de-levering, not a scaling choice. beta is the model multiplier and is held
+    // FIXED live - the fitted beta is reported in Diagnostics only, never fed back. A beta
+    // that moved yesterday would make today's z-score incomparable to yesterday's.
+    //
+    // threshold is an economic hurdle in unlevered %, not a statistical one: it is ~9-13x the
+    // cost of establishing the hedge at current spreads.
+    const PAIRS = {
+      SOXL: {
+        target: "SOXL", bench: "XYZ100", lev: 3, beta: 2.0, threshold: 0.15,
+        title: "SOXL ANALYSIS", macro: ["XYZ100", "SP500"],
+        heavies: ["NVDA", "AMD", "MU", "AVGO", "INTC", "TSM"], heaviesTitle: "SOX Heavyweights",
+        // 3x levered semis ETF; semis carry ~2x beta to NDX. Fitted 2.005 +/- 0.35 on 30 periods.
+        betaStory: "semis carry ~2x beta to NDX"
+      },
+      XYZ100: {
+        target: "XYZ100", bench: "SP500", lev: 1, beta: 1.30, threshold: 0.25,
+        title: "XYZ100 ANALYSIS", macro: ["SP500", "XYZ100"],
+        heavies: ["NVDA", "AAPL", "MSFT", "AMZN", "AVGO", "META", "GOOGL", "TSLA"],
+        heaviesTitle: "NDX Heavyweights",
+        // NDX = SPX + tech tilt. corr x vol-ratio = 0.907 x 1.573 = 1.43 in this high-dispersion
+        // window, ~0.95 x ~1.25 = ~1.19 long-run; 1.30 splits them and is not rejected (t +1.1).
+        betaStory: "NDX is SPX plus a tech tilt, ~30% more market beta"
+      }
+    };
+
+    // US-listed semis vs XYZ100. lev is 1 - these are ordinary shares, nothing to de-lever -
+    // so the whole model is the beta, which for a single stock is an empirical quantity with
+    // no structural anchor to appeal to. Fitted on 40 anchor periods (32 weekday) to
+    // 2026-09-20, then rounded to the coarsest step that does not widen the residual, so the
+    // config does not imply precision the sample cannot support (SEs are 0.19-0.60).
+    //
+    // Betas are SHRUNK toward 2.0, not used raw. At n=35 the raw fits carry SEs of 0.21-0.69,
+    // and the cross-section says 47% of their apparent spread is estimation error rather than
+    // real dispersion (observed var 0.525 vs average sampling noise 0.248, implied true
+    // dispersion 0.53). Raw fits are not stable enough to trade off: MU moved 1.25 - two and a
+    // half SEs - when five observations were added.
+    //
+    // The prior is 2.0, which is not invented: it is the semis-sector beta to NDX already in
+    // the SOXL model (SOXL/3 vs XYZ100 = 2). The cross-sectional mean of the nine raw fits is
+    // 2.04, so the data corroborates it. Weight w = tau^2/(tau^2+SE^2), so a precisely measured
+    // name keeps its own beta (TSM w=0.87) and a noisy one is pulled to the sector (WDC w=0.37).
+    // Shrinkage costs almost no residual vol - worst case ARM, 2.94% -> 3.03%.
+    //
+    //   [ beta used , 1-day residual sigma % at that beta ]   raw fit +/- SE (R^2)
+    const SEMIS_FIT = {
+      NVDA: [1.7, 2.019],   // 1.58 ± 0.33 (.41)
+      AMD:  [1.9, 2.877],   // 1.88 ± 0.49 (.31)
+      MU:   [2.0, 2.850],   // 1.97 ± 0.50 (.32)
+      INTC: [2.4, 2.213],   // 2.72 ± 0.47 (.51)
+      TSM:  [1.2, 1.086],   // 1.09 ± 0.21 (.46)  best-hedged, and precise enough to keep it
+      AVGO: [1.7, 1.899],   // 1.52 ± 0.33 (.40)
+      MRVL: [2.3, 4.114],   // 2.71 ± 0.69 (.32)
+      WDC:  [1.8, 4.149],   // 1.56 ± 0.69 (.13)  XYZ100 explains only an eighth of WDC
+      ARM:  [2.6, 3.033],   // 3.33 ± 0.56 (.52)
+      // Non-US listings, held to the SAME 16:00 ET anchor as everything else. That grid still
+      // contains exactly one Korean cash session per period (19:00-01:30 ET), it just sits near
+      // the START of the period rather than the end - so by the US open their cash session is
+      // already done and the perp has a ~14.5h closed window before the 16:00 exit.
+      // Checked for lead-lag (each name's period vs the NEXT XYZ100 period): R^2 = 0.00/0.00/0.02,
+      // so there is no Asia-leads-US effect at this grid and the contemporaneous fit is correct.
+      // All three shrink to ~2.1, i.e. the 2.0 semis prior describes them well on its own.
+      SMSN: [2.2, 3.473],   // 2.39 ± 0.61 (.32)
+      SKHX: [2.1, 3.939],   // 2.29 ± 0.69 (.25)
+      SKHY: [2.1, 3.855]    // 2.20 ± 0.66 (.25)  near-identical to SKHX; likely the same underlying
+    };
+    // Thresholds are derived from each name's own residual sigma at ONE multiple, so they mean
+    // the same thing across every pair. SOXL and XYZ100 keep their hand-set % values below -
+    // those are live traded numbers and are not mine to change silently.
+    const THR_SIGMA = 0.5;
+    const SEMIS_PEERS = ["NVDA", "AMD", "MU", "INTC", "TSM", "AVGO", "MRVL", "WDC", "ARM",
+                         "SMSN", "SKHX", "SKHY", "SOXL"];
+
+    for (const [tkr, [b, sd]] of Object.entries(SEMIS_FIT)) {
+      PAIRS[tkr] = {
+        target: tkr, bench: "XYZ100", lev: 1, beta: b,
+        threshold: Math.round(THR_SIGMA * sd * 20) / 20,      // snapped to a 0.05% grid
+        title: `${tkr} ANALYSIS`,
+        macro: ["XYZ100", "SOXL"],                            // market beta + sector beta
+        heavies: SEMIS_PEERS, heaviesTitle: "Semis Peers",
+        betaStory: `shrunk toward the 2.0 semis-sector beta; 1-day residual σ ${sd}%`
+      };
+    }
+
+    // Human labels for the macro strip. Anything absent falls back to the bare ticker.
+    const NICE_NAME = {
+      XYZ100: "NASDAQ 100 (XYZ100)", SP500: "S&P 500 (SP500)", SOXL: "SOXL 3x Semis"
+    };
 
     let marketMap = {};
     let baseOwner = {};                    // base ticker -> entry that won the venue contest
     let activeKeys = new Set();
     let isDirty = false;
     let currentView = "main";
+    let activePairKey = null;              // which PAIRS entry the detail/model views are showing
 
     let connState = "connecting";          // connecting | live | reconnecting
     let reconnectAttempts = 0;
     let lastMsgMs = 0;
 
-    let soxlL2 = { bidSz: 0, askSz: 0, spreadBps: Infinity };
+    // base ticker -> aggregated top-5 book. Sizes drive the imbalance bar; notionals are what
+    // the depth read has to be in, since an index quoted at 29531 and one at 7632 have
+    // non-comparable sizes.
+    let books = {};
 
     const taxonomy = [
       { category: "MACRO", subgroups: [
-        { name: "Equity Indices", tickers: ["US500", "QQQ", "IWM", "XYZ100"] },
-        { name: "Commodities & Rates", tickers: ["NATGAS", "COPPER", "CL", "WTIOIL", "GOLD", "TLT"] }
+        // QQQ and IWM are not listed on Hyperliquid on any dex, so they never rendered.
+        // SP500 (xyz, ~$40M/24h) replaces US500 (mkts, ~$3M/24h at a 1/10 scale quote).
+        { name: "Equity Indices", tickers: ["SP500", "XYZ100"] },
+        // WTIOIL is not listed on any dex either; CL is the crude contract that is.
+        { name: "Commodities & Rates", tickers: ["NATGAS", "COPPER", "CL", "GOLD", "TLT"] }
       ]},
       { category: "THEMATICS", subgroups: [
-        { name: "Semiconductors & Equipment", tickers: ["NVDA", "AMD", "TSM", "AVGO", "INTC", "MU", "SOXL"] },
-        { name: "AI & Mega-Cap Tech", tickers: ["AAPL", "GOOGL", "META", "AMZN", "MSFT", "PLTR"] },
+        { name: "Semiconductors & Equipment", tickers: ["NVDA", "AMD", "TSM", "AVGO", "INTC", "MU",
+                                                        "MRVL", "WDC", "ARM", "SMSN", "SKHX", "SKHY", "SOXL"] },
+        { name: "AI & Mega-Cap Tech", tickers: ["AAPL", "GOOGL", "META", "AMZN", "MSFT", "TSLA", "PLTR"] },
         { name: "Crypto & On-Chain", tickers: ["MSTR", "COIN", "IREN", "HOOD"] }
       ]}
     ];
 
-    const hwTickers = ["NVDA", "AMD", "MU", "AVGO", "INTC", "TSM"];
-
+    // Subscribe to the taxonomy AND everything any pair needs. Deriving this rather than
+    // maintaining a second list means a new pair can't silently leave a leg unsubscribed -
+    // which would show it as a dead price rather than as missing.
     taxonomy.forEach(s => s.subgroups.forEach(g => g.tickers.forEach(t => activeKeys.add(t.toUpperCase()))));
+    for (const p of Object.values(PAIRS)) {
+      [p.target, p.bench, ...p.macro, ...p.heavies].forEach(t => activeKeys.add(t.toUpperCase()));
+    }
 
     function formatVolume(val) {
       if (!val || isNaN(val)) return "$0";
@@ -333,6 +440,17 @@
       if (num >= 1e3) return "$" + (num / 1e3).toFixed(0) + "K";
       return "$" + num.toFixed(0);
     }
+
+    // Index legs quote in the thousands (XYZ100 ~29500, SP500 ~7600) and single stocks under
+    // 10, so precision has to track magnitude or the small names lose their tick.
+    function fmtPx(v) {
+      if (!isFinite(v)) return "–";
+      if (v >= 1000) return v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      return v < 10 ? v.toFixed(3) : v.toFixed(2);
+    }
+
+    // 2 -> "2", 1.3 -> "1.3": keeps the beta out of the labels as the desk would say it.
+    const trimNum = (v) => String(parseFloat(v.toFixed(2)));
 
     // FIX 3: deterministic venue precedence. The same base ticker is listed on several
     // dexes (xyz:AVGO vs para:AVGO) and `mkts` carries delisted zero-volume shells of
@@ -413,7 +531,8 @@
       }
       const baseTxt = degraded > 0 ? `vs 4 PM EST · ${degraded} baseline${degraded > 1 ? "s" : ""} approx` : "vs 4 PM EST";
 
-      for (const sfx of ["main", "dt"]) {
+      // "mv" has a dot but no baseline sub-line; the `if (base)` guard covers that.
+      for (const sfx of ["main", "dt", "mv"]) {
         const dot = document.getElementById(`dot-${sfx}`);
         const el = document.getElementById(`conn-${sfx}`);
         const base = document.getElementById(`base-${sfx}`);
@@ -456,21 +575,90 @@
           marketMap[key].elRet = document.getElementById(`ret-${key}`);
           marketMap[key].elOutperf = document.getElementById(`outperf-${key}`);
           marketMap[key].elAge = document.getElementById(`age-${key}`);
-          marketMap[key].elDtPx = document.getElementById(`dt-px-${key}`);
-          marketMap[key].elDtRet = document.getElementById(`dt-ret-${key}`);
-          marketMap[key].elDtAge = document.getElementById(`dt-age-${key}`);
         }
       }
     }
 
-    function openSoxlView(e) {
+    // The heavyweights list is rebuilt per pair (the two lists overlap on NVDA/AVGO, so their
+    // row ids cannot coexist). Clear every dt-* pointer before re-binding, or a pointer left
+    // over from the other pair keeps receiving writes into a detached node.
+    function cacheHeavyPointers(pair) {
+      for (const key of activeKeys) {
+        const item = marketMap[key];
+        if (item) { item.elDtPx = item.elDtRet = item.elDtAge = null; }
+      }
+      for (const key of pair.heavies) {
+        const item = marketMap[key.toUpperCase()];
+        if (!item) continue;
+        item.elDtPx = document.getElementById(`dt-px-${key}`);
+        item.elDtRet = document.getElementById(`dt-ret-${key}`);
+        item.elDtAge = document.getElementById(`dt-age-${key}`);
+      }
+    }
+
+    function rowHtml(item, idPrefix) {
+      const pxStr = fmtPx(item.livePrice);
+      return `
+        <a href="https://app.hyperliquid.xyz/trade/${item.fullName}" target="_blank" class="row">
+          <div class="ticker">
+            <span class="ticker-name">${item.baseName}</span>
+            <span class="ticker-vol">${item.dex} · <span id="${idPrefix}age-${item.baseName}">–</span></span>
+          </div>
+          <div class="price" id="${idPrefix}px-${item.baseName}">-</div>
+          <div class="ret" id="${idPrefix}ret-${item.baseName}">-</div>
+        </a>`;
+    }
+
+    // Static labels are written once here so flushUpdatesToDOM only ever writes values, which
+    // keeps its write-only-if-changed discipline intact.
+    function openDetail(pairKey, e) {
       if (e) e.preventDefault();
+      const pair = PAIRS[pairKey];
+      if (!pair) return;
+      activePairKey = pairKey;
+
+      const tgt = marketMap[pair.target], bench = marketMap[pair.bench];
+      const bStr = trimNum(pair.beta);
+
+      document.getElementById("dt-title").innerText = pair.title;
+      pair.macro.forEach((k, i) => {
+        document.getElementById(`dt-macro-${i}-title`).innerText = NICE_NAME[k] || k;
+      });
+      document.getElementById("dt-basis-label").innerText =
+        `${pair.lev > 1 ? "UNLEV " : ""}${pair.target} vs MODEL SPREAD`;
+      document.getElementById("dt-tgt-label").innerText =
+        pair.lev > 1 ? `Unlev ${pair.target} (Ret/${pair.lev})` : pair.target;
+      document.getElementById("dt-model-label").innerText = `Model (${pair.bench} × ${bStr})`;
+      document.getElementById("dt-book-title").innerText =
+        `${pair.target} L2 Microstructure (Top 5 Levels)`;
+      document.getElementById("dt-heavies-title").innerText = pair.heaviesTitle;
+
+      // The raw-return row only says something distinct when there is leverage to strip out.
+      // Blank it when hidden rather than leaving the other pair's numbers parked in it.
+      const rawRow = document.getElementById("dt-raw-row");
+      rawRow.style.display = pair.lev > 1 ? "block" : "none";
+      document.getElementById("dt-raw-label").innerText = pair.lev > 1 ? `Raw ${pair.lev}x Return vs Snap` : "";
+      if (pair.lev === 1) document.getElementById("dt-ret-close").innerText = "–";
+
+      const trade = document.getElementById("dt-trade");
+      trade.href = tgt ? `https://app.hyperliquid.xyz/trade/${tgt.fullName}` : "#";
+      trade.innerText = tgt ? `open ${tgt.fullName} on Hyperliquid ›` : "not listed";
+
+      let hwHtml = "";
+      for (const k of pair.heavies) {
+        const item = marketMap[k.toUpperCase()];
+        if (item) hwHtml += rowHtml(item, "dt-");
+      }
+      document.getElementById("heavyweights-list").innerHTML =
+        hwHtml || `<div class="chart-note">None of this pair's constituents are listed.</div>`;
+      cacheHeavyPointers(pair);
+
       document.getElementById("main-view").style.display = "none";
       document.getElementById("detail-view").style.display = "block";
-      currentView = "soxl";
+      currentView = "detail";
       isDirty = true;
       flushUpdatesToDOM();
-      window.scrollTo(0,0);
+      window.scrollTo(0, 0);
     }
 
     function closeDetail() {
@@ -500,15 +688,25 @@
         for (const key of activeKeys) {
           let item = marketMap[key];
           if (!item || !item.elPx || !item.elRet) continue;
-          
+
+          // Any pair target shows its de-levered return and its own basis, so the OUTPERF
+          // column carries every modelled leg rather than SOXL alone.
           let retVal = item.rawPct;
           let outperfVal = null;
-          if (item.baseName === "SOXL") {
-            retVal = item.rawPct / 3;
-            if (marketMap["XYZ100"]) outperfVal = retVal - (marketMap["XYZ100"].rawPct * 2);
+          let benchDead = false;
+          let pair = PAIRS[item.baseName.toUpperCase()];
+          if (pair) {
+            retVal = item.rawPct / pair.lev;
+            let bench = marketMap[pair.bench];
+            if (bench) {
+              outperfVal = retVal - (bench.rawPct * pair.beta);
+              // A basis is only as fresh as its stalest leg. The detail view already gates on
+              // both; without this the list would colour a confident basis off a dead hedge.
+              benchDead = ageOf(bench) > STALE_BAD_MS;
+            }
           }
 
-          let pxStr = item.livePrice >= 1000 ? item.livePrice.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",") : (item.livePrice < 10 ? item.livePrice.toFixed(3) : item.livePrice.toFixed(2));
+          let pxStr = fmtPx(item.livePrice);
           if (item.elPx.innerText !== `$${pxStr}`) item.elPx.innerText = `$${pxStr}`;
 
           // a price nobody has quoted in minutes must not render as a live move
@@ -531,7 +729,7 @@
 
           if (item.elOutperf) {
             if (outperfVal !== null) {
-              let oCls = !isFinite(outperfVal) || dead ? "neutral" : (outperfVal >= 0 ? "up" : "down");
+              let oCls = !isFinite(outperfVal) || dead || benchDead ? "neutral" : (outperfVal >= 0 ? "up" : "down");
               let oSign = outperfVal >= 0 ? "+" : "";
               item.elOutperf.className = `outperf ${oCls}`;
               item.elOutperf.innerText = isFinite(outperfVal) ? `${oSign}${outperfVal.toFixed(2)}%` : "–";
@@ -539,54 +737,105 @@
           }
         }
       } 
-      else if (currentView === "soxl") {
-        let macroKeys = ["XYZ100", "US500"];
-        macroKeys.forEach(k => {
+      else if (currentView === "detail") {
+        const pair = PAIRS[activePairKey];
+        if (!pair) return;
+
+        pair.macro.forEach((k, i) => {
           let m = marketMap[k];
-          if (m) {
-            let el = document.getElementById(`dt-${k.toLowerCase()}`);
-            let ok = isFinite(m.rawPct);
-            let cls = !ok || ageOf(m) > STALE_BAD_MS ? "neutral" : (m.rawPct >= 0 ? "up" : "down");
-            let sgn = m.rawPct >= 0 ? "+" : "";
-            el.className = `macro-card-val ${cls}`;
-            el.innerText = ok ? `${sgn}${m.rawPct.toFixed(2)}%` : "–";
-          }
+          let el = document.getElementById(`dt-macro-${i}-val`);
+          if (!m) { el.className = "macro-card-val neutral"; el.innerText = "–"; return; }
+          let ok = isFinite(m.rawPct);
+          let cls = !ok || ageOf(m) > STALE_BAD_MS ? "neutral" : (m.rawPct >= 0 ? "up" : "down");
+          let sgn = m.rawPct >= 0 ? "+" : "";
+          el.className = `macro-card-val ${cls}`;
+          el.innerText = ok ? `${sgn}${m.rawPct.toFixed(2)}%` : "–";
         });
 
-        // Calculate Unleveraged Return vs Unleveraged Model
-        let soxl = marketMap["SOXL"];
-        let xyz100 = marketMap["XYZ100"];
-        
-        if (soxl && xyz100) {
-           let unlevSoxl = soxl.rawPct / 3;
-           let unlevModel = xyz100.rawPct * 2;
-           let basis = unlevSoxl - unlevModel;
+        let tgt = marketMap[pair.target];
+        let bench = marketMap[pair.bench];
+
+        if (tgt && bench) {
+           let tgtRet = tgt.rawPct / pair.lev;
+           let modelRet = bench.rawPct * pair.beta;
+           let basis = tgtRet - modelRet;
 
            // FIX 5: the basis is a small number built from two live mids and two
            // baselines. Gate it on all four being trustworthy rather than colouring
-           // a tradeable signal off a stale leg or a book wider than the threshold.
-           let soxlAge = ageOf(soxl), xyzAge = ageOf(xyz100);
-           let worstAge = Math.max(soxlAge, xyzAge);
-           let spreadBps = soxlL2.spreadBps;
+           // a tradeable signal off a stale leg or a book that can't cover the hurdle.
+           let tgtAge = ageOf(tgt), benchAge = ageOf(bench);
+           let tBook = books[pair.target] || {}, bBook = books[pair.bench] || {};
+           let sT = tBook.spreadBps, sB = bBook.spreadBps;
+
+           // Both sides of this comparison are bps of TARGET notional, which is what makes
+           // them comparable. basis is in unlevered %, so the hurdle re-levers: 0.15%
+           // unlevered on SOXL is 45bp of SOXL price, not 15bp.
+           //
+           // The hedge ratio follows from the basis definition, and it carries the leverage:
+           //   b = r_T/L − β·r_B   =>   r_T = L·b + L·β·r_B
+           // so a $100 SOXL short needs $600 of XYZ100 (L·β = 6) to cancel r_B, not $200.
+           // The bench spread is therefore paid on L·β of notional, not β.
+           let costBps = isFinite(sT) && isFinite(sB) ? sT + pair.lev * pair.beta * sB : NaN;
+           let hurdleBps = pair.threshold * pair.lev * 100;
+
            let reasons = [];
-           if (worstAge > STALE_WARN_MS) reasons.push(`stale leg: SOXL ${fmtAge(soxlAge)} / XYZ100 ${fmtAge(xyzAge)}`);
-           if (!isFinite(spreadBps)) reasons.push("no SOXL book yet");
-           else if (spreadBps > SPREAD_WARN_BPS) reasons.push(`SOXL book ${spreadBps.toFixed(1)}bps wide vs ${SPREAD_WARN_BPS}bps signal`);
+           if (Math.max(tgtAge, benchAge) > STALE_WARN_MS)
+             reasons.push(`stale leg: ${pair.target} ${fmtAge(tgtAge)} / ${pair.bench} ${fmtAge(benchAge)}`);
+           if (!isFinite(costBps)) reasons.push(`no ${!isFinite(sT) ? pair.target : pair.bench} book yet`);
+           else if (costBps > hurdleBps)
+             reasons.push(`hedge costs ${costBps.toFixed(1)}bps vs a ${hurdleBps.toFixed(0)}bps hurdle`);
            if (connState !== "live") reasons.push(`feed ${connState}`);
-           if (soxl.closeSource && soxl.closeSource !== "snap") reasons.push(`SOXL baseline is ${soxl.closeSource}, not the 4 PM snap`);
-           if (xyz100.closeSource && xyz100.closeSource !== "snap") reasons.push(`XYZ100 baseline is ${xyz100.closeSource}, not the 4 PM snap`);
+           if (tgt.closeSource && tgt.closeSource !== "snap")
+             reasons.push(`${pair.target} baseline is ${tgt.closeSource}, not the 4 PM snap`);
+           if (bench.closeSource && bench.closeSource !== "snap")
+             reasons.push(`${pair.bench} baseline is ${bench.closeSource}, not the 4 PM snap`);
            let reliable = reasons.length === 0 && isFinite(basis);
 
            let bsEl = document.getElementById("dt-basis");
            let bsCls = !reliable ? "neutral"
-                     : (basis > BASIS_THRESHOLD_PCT ? "down" : (basis < -BASIS_THRESHOLD_PCT ? "up" : "neutral"));
+                     : (basis > pair.threshold ? "down" : (basis < -pair.threshold ? "up" : "neutral"));
            let bsSgn = basis >= 0 ? "+" : "";
 
            bsEl.className = `basis-spread ${bsCls}`;
            bsEl.innerText = isFinite(basis) ? `${bsSgn}${basis.toFixed(2)}%` : "–";
 
+           // PERP vs ORACLE. Both legs are perps: mark is the perp's own book, oracle is the
+           // external index reference, so mark-oracle is the part of the price that is perp
+           // positioning rather than index. Funding is what that premium costs to carry.
+           //
+           // The basis is a RETURN from the 16:00 anchor, so a gap that was already there at
+           // the anchor cancels out. There is no oracle-history endpoint, so we cannot know how
+           // much of today's gap is new - which makes the honest statement an upper bound:
+           // if the whole gap appeared since the anchor, it would account for
+           //   (gap_T/lev - beta*gap_B)  of the basis.
+           // That is reported as a share of the threshold so it is comparable to the signal.
+           let gapBp = (it) => (it && it.oraclePrice > 0 && it.livePrice > 0)
+             ? (it.livePrice / it.oraclePrice - 1) * 10000 : NaN;
+           let gT = gapBp(tgt), gB = gapBp(bench);
+           let fnd = (it) => it && isFinite(it.funding) ? it.funding * 24 * 365 * 100 : NaN;
+           let leg = (nm, g, f) => `${nm} ${isFinite(g) ? sgn(g, 1) + "bp" : "–"}`
+                                 + `${isFinite(f) ? ` fnd ${sgn(f, 0)}%/yr` : ""}`;
+           let maxContam = (isFinite(gT) && isFinite(gB)) ? (gT / pair.lev - pair.beta * gB) / 100 : NaN;
+           let contamShare = isFinite(maxContam) ? Math.abs(maxContam) / pair.threshold * 100 : NaN;
+           let pEl = document.getElementById("dt-perp");
+           // Signed, deliberately: the sign says which way the perp effect pushes the basis.
+           // A basis of -0.06% with a -0.13% perp component means the underlying INDEX
+           // dislocation may be the opposite sign to the number on the card.
+           let pTxt = `perp vs oracle: ${leg(pair.target, gT, fnd(tgt))} · ${leg(pair.bench, gB, fnd(bench))}`
+                    + (isFinite(maxContam)
+                        ? ` · perp explains up to ${sgn(maxContam, 3)}% of basis (${contamShare.toFixed(0)}% of thr)`
+                        : "");
+           if (pEl.innerText !== pTxt) pEl.innerText = pTxt;
+           pEl.style.color = contamShare > 25 ? "var(--warn)" : "var(--text-dim)";
+
+           // Depth is reported, not gated: at ~1bp spreads the cost test almost never binds,
+           // so thin top-of-book is the real constraint. Watch these before picking a level.
+           let dep = (b) => isFinite(b.bidNtl) ? `${formatVolume(b.bidNtl)}/${formatVolume(b.askNtl)}` : "–";
            let qEl = document.getElementById("dt-quality");
-           let qTxt = `SOXL ${fmtAge(soxlAge)} · XYZ100 ${fmtAge(xyzAge)} · spread ${isFinite(spreadBps) ? spreadBps.toFixed(1) + "bps" : "–"} · base ${soxl.closeSource || "?"}/${xyz100.closeSource || "?"} · ${soxl.dex}/${xyz100.dex}`;
+           let qTxt = `${pair.target} ${fmtAge(tgtAge)} · ${pair.bench} ${fmtAge(benchAge)}`
+                    + ` · cost ${isFinite(costBps) ? costBps.toFixed(1) + "bps" : "–"}/${hurdleBps.toFixed(0)}bps`
+                    + ` · top5 ${dep(tBook)} + ${dep(bBook)}`
+                    + ` · base ${tgt.closeSource || "?"}/${bench.closeSource || "?"} · ${tgt.dex}/${bench.dex}`;
            if (qEl.innerText !== qTxt) qEl.innerText = qTxt;
 
            let fEl = document.getElementById("dt-flag");
@@ -598,35 +847,34 @@
              fEl.style.display = "block";
            }
 
-           document.getElementById("dt-soxl-unlev").innerText = isFinite(unlevSoxl) ? `${unlevSoxl >= 0 ? '+' : ''}${unlevSoxl.toFixed(2)}%` : "–";
-           document.getElementById("dt-model-unlev").innerText = isFinite(unlevModel) ? `${unlevModel >= 0 ? '+' : ''}${unlevModel.toFixed(2)}%` : "–";
-           
-           document.getElementById("dt-soxl-live").innerText = `$${soxl.livePrice.toFixed(2)}`;
-           if (soxl.closePrice) {
-              document.getElementById("dt-soxl-snap").innerText = `$${soxl.closePrice.toFixed(2)}`;
+           document.getElementById("dt-tgt-ret").innerText = isFinite(tgtRet) ? `${tgtRet >= 0 ? '+' : ''}${tgtRet.toFixed(2)}%` : "–";
+           document.getElementById("dt-model-ret").innerText = isFinite(modelRet) ? `${modelRet >= 0 ? '+' : ''}${modelRet.toFixed(2)}%` : "–";
+
+           document.getElementById("dt-live").innerText = `$${fmtPx(tgt.livePrice)}`;
+           document.getElementById("dt-snap").innerText = tgt.closePrice > 0 ? `$${fmtPx(tgt.closePrice)}` : "–";
+
+           if (pair.lev > 1) {
+             let okRet = isFinite(tgt.rawPct);
+             let rSign = tgt.rawPct >= 0 ? "+" : "";
+             let retEl = document.getElementById("dt-ret-close");
+             retEl.innerText = okRet ? `${rSign}${tgt.rawPct.toFixed(2)}%` : "–";
+             retEl.style.color = !okRet ? "#48484A" : (tgt.rawPct >= 0 ? "var(--up)" : "var(--down)");
            }
-           
-           let okRet = isFinite(soxl.rawPct);
-           let rSign = soxl.rawPct >= 0 ? "+" : "";
-           let retEl = document.getElementById("dt-soxl-ret-close");
-           retEl.innerText = okRet ? `${rSign}${soxl.rawPct.toFixed(2)}%` : "–";
-           retEl.style.color = !okRet ? "#48484A" : (soxl.rawPct >= 0 ? "var(--up)" : "var(--down)");
         }
 
-        let totalSz = soxlL2.bidSz + soxlL2.askSz;
+        let tb = books[pair.target] || {};
+        let totalSz = (tb.bidSz || 0) + (tb.askSz || 0);
         if (totalSz > 0) {
-           let bidPct = (soxlL2.bidSz / totalSz) * 100;
-           let askPct = (soxlL2.askSz / totalSz) * 100;
-           document.getElementById("dt-bid-bar").style.width = `${bidPct}%`;
-           document.getElementById("dt-ask-bar").style.width = `${askPct}%`;
-           document.getElementById("dt-bid-sz").innerText = `Bids: ${soxlL2.bidSz.toFixed(0)}`;
-           document.getElementById("dt-ask-sz").innerText = `Asks: ${soxlL2.askSz.toFixed(0)}`;
+           document.getElementById("dt-bid-bar").style.width = `${(tb.bidSz / totalSz) * 100}%`;
+           document.getElementById("dt-ask-bar").style.width = `${(tb.askSz / totalSz) * 100}%`;
+           document.getElementById("dt-bid-sz").innerText = `Bids: ${tb.bidSz.toFixed(0)} (${formatVolume(tb.bidNtl)})`;
+           document.getElementById("dt-ask-sz").innerText = `Asks: ${tb.askSz.toFixed(0)} (${formatVolume(tb.askNtl)})`;
         }
 
-        hwTickers.forEach(k => {
-           let item = marketMap[k];
+        pair.heavies.forEach(k => {
+           let item = marketMap[k.toUpperCase()];
            if (item && item.elDtPx && item.elDtRet) {
-              let pxStr = item.livePrice >= 1000 ? item.livePrice.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",") : (item.livePrice < 10 ? item.livePrice.toFixed(3) : item.livePrice.toFixed(2));
+              let pxStr = fmtPx(item.livePrice);
               let hwAge = ageOf(item);
               let hwDead = hwAge > STALE_BAD_MS;
               let rClass = !isFinite(item.rawPct) || hwDead ? "neutral" : (item.rawPct >= 0 ? "up" : "down");
@@ -721,14 +969,21 @@
                item.livePrice = mid;
                isDirty = true;
 
-               if (item.baseName.toUpperCase() === "SOXL") {
-                  let bSz = 0; let aSz = 0;
-                  for(let i=0; i<Math.min(5, levels[0].length); i++) bSz += parseFloat(levels[0][i].sz);
-                  for(let i=0; i<Math.min(5, levels[1].length); i++) aSz += parseFloat(levels[1][i].sz);
-                  soxlL2.bidSz = bSz;
-                  soxlL2.askSz = aSz;
-                  soxlL2.spreadBps = item.spreadBps;
+               // Aggregate top-5 for every subscribed name, not just one: any instrument can
+               // be a pair's target or its hedge leg, and both legs' books gate the basis.
+               // Notional as well as size - sizes are not comparable across an index quoted
+               // at 29500 and one quoted at 7600.
+               let bSz = 0, aSz = 0, bNtl = 0, aNtl = 0;
+               for (let i = 0; i < Math.min(5, levels[0].length); i++) {
+                  let l = levels[0][i], sz = parseFloat(l.sz);
+                  bSz += sz; bNtl += sz * parseFloat(l.px);
                }
+               for (let i = 0; i < Math.min(5, levels[1].length); i++) {
+                  let l = levels[1][i], sz = parseFloat(l.sz);
+                  aSz += sz; aNtl += sz * parseFloat(l.px);
+               }
+               books[item.baseName.toUpperCase()] =
+                  { bidSz: bSz, askSz: aSz, bidNtl: bNtl, askNtl: aNtl, spreadBps: item.spreadBps };
            }
         }
       };
@@ -746,9 +1001,27 @@
       sock.onerror = () => { /* onclose always follows; handled there */ };
     }
 
+    // Oracle + funding poll. `metaAndAssetCtxs` carries oraclePx AND funding in one response,
+    // so both come free in the same request.
+    //
+    // RATE LIMIT: HL gives an IP 1200 weight/minute shared across ALL REST calls, and
+    // metaAndAssetCtxs costs 20. Polling all 5 dexes every 5s is 12 x 5 x 20 = 1200/min, i.e.
+    // 100% of the budget - which starved every candleSnapshot (weight 20 + 1 per 60 candles,
+    // so ~103 per model-history leg) and silently degraded baselines to prevDayPx via the
+    // catch below. Polling only the dexes that actually own a displayed instrument is
+    // currently 1 dex = 240/min (20%), leaving real headroom at the same 5s cadence.
+    function neededDexes() {
+      const out = new Set();
+      for (const key of activeKeys) {
+        const item = marketMap[key];
+        if (item) out.add(item.dexParam);
+      }
+      return [...out];
+    }
+
     async function pollOraclePrices() {
       while (true) {
-        await sleep(5000); 
+        await sleep(5000);
         const fetchDexOracle = async (dex) => {
           let payload = { type: "metaAndAssetCtxs" };
           if (dex) payload.dex = dex;
@@ -761,28 +1034,35 @@
               for (let i = 0; i < universe.length; i++) {
                 let uName = universe[i].name;
                 let oracle = parseFloat(ctxs[i].oraclePx || ctxs[i].markPx || 0);
+                let funding = parseFloat(ctxs[i].funding || 0);
                 let item = marketMap[uName.toUpperCase()];
-                if (item && item.oraclePrice !== oracle) {
+                if (!item) continue;
+                if (item.oraclePrice !== oracle || item.funding !== funding) {
                    item.oraclePrice = oracle;
+                   item.funding = funding;
+                   item.oracleMs = Date.now();
                    isDirty = true;
                 }
               }
             }
           } catch(e) {}
         };
-        await Promise.all(DEX_LIST.map(fetchDexOracle));
+        await Promise.all(neededDexes().map(fetchDexOracle));
       }
     }
 
     // ======================= MODEL ERROR HISTORY =======================
-    // e = r_SOXL/3 - 2*r_XYZ100, computed per rebalance period.
+    // e = r_target/lev - beta*r_bench, computed per rebalance period.
     //
-    // SOXL resets to 3x leverage at every NAV strike, so the 3x claim holds for ONE
-    // period only. De-levering therefore happens per period BEFORE any aggregation.
-    // De-levering a CUMULATIVE return instead would manufacture volatility drag
-    // (~ -(L-1)/2 * sigma^2 * t, about -1.3%/month at these vols) and, because the
+    // A levered ETF resets to its stated leverage at every NAV strike, so the 3x claim
+    // holds for ONE period only. De-levering therefore happens per period BEFORE any
+    // aggregation. De-levering a CUMULATIVE return instead would manufacture volatility
+    // drag (~ -(L-1)/2 * sigma^2 * t, about -1.3%/month at these vols) and, because the
     // drag is always negative, would read as permanent SOXL cheapness - a standing
     // fake buy signal. Never divide a multi-day SOXL return by 3.
+    //
+    // The per-period structure is still required when lev == 1 (XYZ100/SP500): beta*r does
+    // not aggregate across periods either, so there is no shortcut for the unlevered pair.
 
     const NYSE_HOLIDAYS = new Set([
       "2026-01-01","2026-01-19","2026-02-16","2026-04-03","2026-05-25","2026-06-19",
@@ -854,7 +1134,7 @@
       return leg;
     }
 
-    function buildModel(archS, archX, idxS, idxX) {
+    function buildModel(archS, archX, idxS, idxX, lev, beta) {
       const grid = Object.keys(archS).filter(d => (d in archX) && isTradingDay(d)).sort();
 
       const rows = [];
@@ -864,21 +1144,33 @@
         if (!isFinite(rs) || !isFinite(rx)) continue;
         rows.push({
           from: a, to: b, gap: dayGap(a, b),
-          rSoxl: rs * 100, unlev: rs / 3 * 100, rNq: rx * 100, model: 2 * rx * 100,
-          err: (rs / 3 - 2 * rx) * 100,
+          rTgt: rs * 100, unlev: rs / lev * 100, rBench: rx * 100, model: beta * rx * 100,
+          err: (rs / lev - beta * rx) * 100,
           half: NYSE_HALFDAYS.has(a) || NYSE_HALFDAYS.has(b)
         });
       }
 
       const clean = rows.filter(r => !r.half);
       const errs = clean.map(r => r.err);
-      const stats = { n: errs.length, mean: NaN, sd: NaN, beta: NaN, seBeta: NaN, r2: NaN, tBeta: NaN };
+      const stats = { n: errs.length, mean: NaN, sd: NaN, beta: NaN, seBeta: NaN, r2: NaN, tBeta: NaN,
+                      sdDaily: NaN, nDaily: 0 };
       if (errs.length > 2) {
         stats.mean = errs.reduce((s, v) => s + v, 0) / errs.length;
         stats.sd = Math.sqrt(errs.reduce((s, v) => s + (v - stats.mean) ** 2, 0) / (errs.length - 1));
         stats.tMean = stats.mean / (stats.sd / Math.sqrt(errs.length));
-        // empirical beta: regress the de-levered SOXL daily return on the XYZ100 daily return
-        const xs = clean.map(r => r.rNq), ys = clean.map(r => r.unlev), n = xs.length;
+
+        // ONE-DAY sigma, the unit the spread is quoted in on the desk. stats.sd above pools
+        // weekend and holiday gaps, whose errors are ~sqrt(gap) larger, so it overstates a
+        // daily move and would make the quoted number drift with the calendar. Restrict to
+        // gap == 1 so "0.3 of a daily sigma" means the same thing every day of the week.
+        const d1 = clean.filter(r => r.gap === 1).map(r => r.err);
+        stats.nDaily = d1.length;
+        if (d1.length > 2) {
+          const m1 = d1.reduce((s, v) => s + v, 0) / d1.length;
+          stats.sdDaily = Math.sqrt(d1.reduce((s, v) => s + (v - m1) ** 2, 0) / (d1.length - 1));
+        }
+        // empirical beta: regress the de-levered target return on the benchmark return
+        const xs = clean.map(r => r.rBench), ys = clean.map(r => r.unlev), n = xs.length;
         const mx = xs.reduce((s, v) => s + v, 0) / n, my = ys.reduce((s, v) => s + v, 0) / n;
         let sxx = 0, sxy = 0;
         for (let i = 0; i < n; i++) { sxx += (xs[i] - mx) ** 2; sxy += (xs[i] - mx) * (ys[i] - my); }
@@ -889,7 +1181,7 @@
           for (let i = 0; i < n; i++) { rss += (ys[i] - alpha - stats.beta * xs[i]) ** 2; tss += (ys[i] - my) ** 2; }
           stats.seBeta = Math.sqrt((rss / (n - 2)) / sxx);
           stats.r2 = tss > 0 ? 1 - rss / tss : NaN;
-          stats.tBeta = (stats.beta - 2) / stats.seBeta;
+          stats.tBeta = (stats.beta - beta) / stats.seBeta;   // tested against the live multiplier
         }
       }
 
@@ -908,7 +1200,7 @@
           if (!(sp > 0) || !(xp > 0)) continue;
           const k = Math.round((t - aMs) / CANDLE_MS);
           if (!bucket.has(k)) bucket.set(k, []);
-          bucket.get(k).push(((sp / s0 - 1) / 3 - 2 * (xp / x0 - 1)) * 100);
+          bucket.get(k).push(((sp / s0 - 1) / lev - beta * (xp / x0 - 1)) * 100);
         }
       }
       const cone = (m) => {
@@ -929,16 +1221,21 @@
       if (aMs == null) return pts;
       const s0 = m.idxS.px.get(aMs), x0 = m.idxX.px.get(aMs);
       if (!(s0 > 0) || !(x0 > 0)) return pts;
+      const lev = m.lev, beta = m.beta;
       for (let t = aMs; t <= Date.now(); t += CANDLE_MS) {
         const sp = m.idxS.px.get(t), xp = m.idxX.px.get(t);
         if (!(sp > 0) || !(xp > 0)) continue;
-        pts.push({ k: Math.round((t - aMs) / CANDLE_MS), e: ((sp / s0 - 1) / 3 - 2 * (xp / x0 - 1)) * 100 });
+        pts.push({ k: Math.round((t - aMs) / CANDLE_MS), e: ((sp / s0 - 1) / lev - beta * (xp / x0 - 1)) * 100 });
       }
-      // live tip from the current mids, fresher than the last closed candle
-      const s = marketMap["SOXL"], x = marketMap["XYZ100"];
-      if (s && x && s.livePrice > 0 && x.livePrice > 0) {
+      // Live tip from the current mids, fresher than the last closed candle - but ONLY while
+      // both legs are actually quoting. Plotting a stale mid at the current elapsed time draws
+      // the path flat-lining forward, which reads as "the error has not moved" when the truth
+      // is "we have no data". Dropping the tip leaves the path ending at the last real candle.
+      const s = marketMap[m.pair.target], x = marketMap[m.pair.bench];
+      if (s && x && s.livePrice > 0 && x.livePrice > 0
+          && Math.max(ageOf(s), ageOf(x)) <= STALE_WARN_MS) {
         pts.push({ k: (Date.now() - aMs) / CANDLE_MS,
-                   e: ((s.livePrice / s0 - 1) / 3 - 2 * (x.livePrice / x0 - 1)) * 100, live: true });
+                   e: ((s.livePrice / s0 - 1) / lev - beta * (x.livePrice / x0 - 1)) * 100, live: true });
       }
       return pts;
     }
@@ -1049,7 +1346,11 @@
       wrap.addEventListener("touchend", () => setTimeout(() => { tip.style.opacity = 0; }, 2000));
     }
 
-    let modelState = null, modelLoading = false;
+    // Keyed by pair: both pairs render into the same #mv-* DOM, so switching between them must
+    // not discard the other's fetched history (or, worse, draw one pair's path on the other's
+    // scales). `modelState()` is the accessor everything below reads.
+    let modelStates = {}, modelLoading = {};
+    const modelState = () => modelStates[activePairKey] || null;
 
     function coneAt(cone, k) {
       let best = null;
@@ -1058,8 +1359,9 @@
     }
 
     function renderModelView() {
-      const m = modelState;
+      const m = modelState();
       if (!m) return;
+      const pair = m.pair, bStr = trimNum(pair.beta);
       const nd = nextTradingDay(m.todayAnchor);
       const gapToday = nd ? dayGap(m.todayAnchor, nd) : 1;
       const weekend = gapToday > 1;
@@ -1078,12 +1380,20 @@
       m.barScale = b;
 
       const st = m.stats;
+      document.getElementById("mv-formula").innerText =
+        `${pair.target}${pair.lev > 1 ? "/" + pair.lev : ""} − ${pair.bench}×${bStr}`;
+      document.getElementById("mv-bars-title").innerText =
+        `Daily ${pair.lev > 1 ? "unlevered " : ""}error, close → close`;
+      document.getElementById("mv-lg-rich").innerText = `${pair.target} rich`;
+      document.getElementById("mv-lg-cheap").innerText = `${pair.target} cheap`;
+      document.getElementById("mv-btest-k").innerText = `β vs ${pair.beta.toFixed(2)}`;
       document.getElementById("mv-range").innerText = m.clean.length
         ? `${m.clean[0].from} → ${m.clean[m.clean.length - 1].to}` : "–";
       document.getElementById("mv-cone-n").innerText = cone.length ? String(coneAt(cone, 0).n) : "0";
       document.getElementById("mv-n").innerText = String(st.n);
       document.getElementById("mv-mean").innerText = isFinite(st.mean) ? `${sgn(st.mean, 3)}%` : "–";
-      document.getElementById("mv-sigma").innerText = isFinite(st.sd) ? `${st.sd.toFixed(3)}%` : "–";
+      // The 1-day sigma, not the pooled one - this is the unit the spread is quoted in.
+      document.getElementById("mv-sigma").innerText = isFinite(st.sdDaily) ? `${st.sdDaily.toFixed(3)}%` : "–";
       document.getElementById("mv-beta").innerText = isFinite(st.beta) ? `${st.beta.toFixed(2)}±${st.seBeta.toFixed(2)}` : "–";
       document.getElementById("mv-r2").innerText = isFinite(st.r2) ? st.r2.toFixed(2) : "–";
       const bt = document.getElementById("mv-btest");
@@ -1097,35 +1407,50 @@
         `±1σ of the error at the same elapsed time across ${weekend ? "weekend" : "weekday"}-anchored periods`
         + ` (anchor ${m.todayAnchor}, next session ${nd || "?"}). Weekend anchors are pooled separately:`
         + ` at +15h a Friday anchor is still Saturday morning, so the two are not comparable.`
-        + (sigNow ? ` σ here is ${sigNow.sd.toFixed(3)}% from n=${sigNow.n}, so the live ±${BASIS_THRESHOLD_PCT}%`
-                    + ` threshold is ${(BASIS_THRESHOLD_PCT / sigNow.sd).toFixed(2)}σ.` : "");
+        + (sigNow ? ` σ of the band here is ${sigNow.sd.toFixed(3)}% from n=${sigNow.n} — that is the`
+                    + ` hour-conditional context, and it is read off the chart, not off the headline number.` : "")
+        + (isFinite(st.sdDaily)
+            ? ` <strong>× daily σ is quoted against the 1-day σ of ${st.sdDaily.toFixed(3)}%</strong>`
+              + ` (n=${st.nDaily} weekday periods) and is deliberately NOT scaled by elapsed time, so the`
+              + ` same spread reads the same at 19:00 and at 15:00. On that unit the ±${pair.threshold}%`
+              + ` threshold is ${(pair.threshold / st.sdDaily).toFixed(2)}σ.` : "");
       document.getElementById("mv-bars-note").innerHTML =
-        `One bar per rebalance period, de-levered <em>per period</em> — SOXL resets to 3× at every NAV strike,`
-        + ` so a cumulative return divided by 3 would fabricate volatility drag. NYSE holidays are dropped`
-        + ` so the return spans the gap (one strike to the next); half sessions are excluded. Band is mean ±1σ.`
-        + ` Multiply by 3 for the SOXL-price dislocation.`;
+        `One bar per rebalance period, computed <em>per period</em> — `
+        + (pair.lev > 1
+            ? `${pair.target} resets to ${pair.lev}× at every NAV strike, so a cumulative return divided by`
+              + ` ${pair.lev} would fabricate volatility drag.`
+            : `β·r does not aggregate across periods, so the error cannot be taken from a cumulative return.`)
+        + ` NYSE holidays are dropped so the return spans the gap (one strike to the next); half sessions`
+        + ` are excluded. Band is mean ±1σ.`
+        + (pair.lev > 1 ? ` Multiply by ${pair.lev} for the ${pair.target}-price dislocation.` : "");
       document.getElementById("mv-diag-note").innerHTML = isFinite(st.beta)
-        ? `β is fitted in-sample on n=${st.n} and is <strong>reported only</strong> — the live model keeps its ×2.`
-          + ` ${Math.abs(st.tBeta) < 2 ? `×2 is not rejected (|t|&lt;2).` : `×2 is rejected (|t|≥2).`}`
+        ? `β is fitted in-sample on n=${st.n} and is <strong>reported only</strong> — the live model keeps its ×${bStr}`
+          + ` (${pair.betaStory}).`
+          + ` ${Math.abs(st.tBeta) < 2 ? `×${bStr} is not rejected (|t|&lt;2).` : `×${bStr} is rejected (|t|≥2).`}`
           + ` SE ±${st.seBeta.toFixed(2)} is wide at this sample size, so treat it as a scale check, not a calibration.`
           + ` Mean error t=${isFinite(st.tMean) ? sgn(st.tMean, 2) : "–"}.`
         : "Not enough history yet for a beta estimate.";
 
-      // table-view twin
-      let t = `<table class="dt"><tr><th>to</th><th>SOXL</th><th>unlev</th><th>NQ</th><th>model</th><th>err</th></tr>`;
+      // table-view twin. The unlev column is only distinct from the raw return when lev > 1.
+      const cols = pair.lev > 1
+        ? [["to", r => r.to.slice(5) + (r.gap > 1 ? "*" : "")], [pair.target, r => sgn(r.rTgt, 2)],
+           ["unlev", r => sgn(r.unlev, 3)], [pair.bench, r => sgn(r.rBench, 2)],
+           ["model", r => sgn(r.model, 3)]]
+        : [["to", r => r.to.slice(5) + (r.gap > 1 ? "*" : "")], [pair.target, r => sgn(r.rTgt, 2)],
+           [pair.bench, r => sgn(r.rBench, 2)], ["model", r => sgn(r.model, 3)]];
+      let t = `<table class="dt"><tr>${cols.map(c => `<th>${c[0]}</th>`).join("")}<th>err</th></tr>`;
       for (const r of m.clean.slice().reverse()) {
-        t += `<tr><td>${r.to.slice(5)}${r.gap > 1 ? "*" : ""}</td><td>${sgn(r.rSoxl, 2)}</td><td>${sgn(r.unlev, 3)}</td>`
-           + `<td>${sgn(r.rNq, 2)}</td><td>${sgn(r.model, 3)}</td>`
+        t += `<tr>${cols.map(c => `<td>${c[1](r)}</td>`).join("")}`
            + `<td style="color:${r.err >= 0 ? "#FF453A" : "#199E70"}">${sgn(r.err, 3)}</td></tr>`;
       }
       document.getElementById("mv-table").innerHTML = t + `</table>`
         + `<div class="chart-note">* period spans a weekend or holiday gap. All values %.</div>`;
 
-      // Hit-tests read modelState at call time: the wiring is installed once, but
-      // loadModelHistory builds a fresh state object on every open, so capturing it
-      // here would leave the tooltips on the first visit's scales.
+      // Hit-tests read modelState() at call time: the wiring is installed once against shared
+      // DOM, but loadModelHistory builds a fresh state per pair on every open, so capturing it
+      // here would leave the tooltips on the first pair's scales.
       wireTip("mv-cone-wrap", "mv-cone", "mv-tip1", c.vbH, (vx) => {
-        const st = modelState;
+        const st = modelState();
         if (!st || !st.scale || (!st.cone.length && !st.today.length)) return null;
         const k = Math.round((vx - 34) / (340 - 8 - 34) * st.maxStep);
         if (k < 0 || k > st.maxStep) return null;
@@ -1138,14 +1463,15 @@
         return { html, x: st.scale.X(k), y: st.scale.Y(tp ? tp.e : (cp ? cp.mu : 0)) };
       });
       wireTip("mv-bars-wrap", "mv-bars", "mv-tip2", b.vbH, (vx) => {
-        const st = modelState;
+        const st = modelState();
         if (!st || !st.barScale) return null;
         const bs = st.barScale;
         const i = Math.floor((vx - bs.x0) / (bs.slot || 1));
         if (i < 0 || i >= st.clean.length) return null;
-        const r = st.clean[i];
-        return { html: `${r.from} → ${r.to}${r.gap > 1 ? " *gap" : ""}<br>unlev ${sgn(r.unlev, 3)}% · model ${sgn(r.model, 3)}%`
-                       + `<br>err ${sgn(r.err, 3)}% (×3 = ${sgn(r.err * 3, 2)}%)`,
+        const r = st.clean[i], lv = st.pair.lev;
+        return { html: `${r.from} → ${r.to}${r.gap > 1 ? " *gap" : ""}`
+                       + `<br>${lv > 1 ? "unlev" : st.pair.target} ${sgn(r.unlev, 3)}% · model ${sgn(r.model, 3)}%`
+                       + `<br>err ${sgn(r.err, 3)}%${lv > 1 ? ` (×${lv} = ${sgn(r.err * lv, 2)}%)` : ""}`,
                  x: bs.x0 + (i + 0.5) * bs.slot, y: bs.Y(Math.max(0, r.err)) };
       });
 
@@ -1154,7 +1480,7 @@
 
     // Only the live tip of today's path moves between renders, so just move it.
     function updateModelLive() {
-      const m = modelState;
+      const m = modelState();
       if (!m || !m.scale) return;
       const today = buildTodayPath(m);
       m.today = today;
@@ -1165,44 +1491,63 @@
       if (dot) { dot.setAttribute("cx", m.scale.X(last.k).toFixed(1)); dot.setAttribute("cy", m.scale.Y(last.e).toFixed(1)); }
 
       const cp = coneAt(m.cone, last.k);
+      const thr = m.pair.threshold;
+      // The z-score is the number you would act on, so it gets the same freshness test as the
+      // detail view's basis: if a leg is quiet or the socket is down, show the value but do not
+      // colour it as actionable. `last.live` is false when buildTodayPath withheld the tip.
+      const tgt = marketMap[m.pair.target], bch = marketMap[m.pair.bench];
+      const stale = !last.live || connState !== "live"
+                 || Math.max(ageOf(tgt), ageOf(bch)) > STALE_WARN_MS;
       const nowEl = document.getElementById("mv-now"), sEl = document.getElementById("mv-signow"), zEl = document.getElementById("mv-z");
       nowEl.innerText = `${sgn(last.e, 3)}%`;
-      nowEl.className = `stat-v ${last.e > BASIS_THRESHOLD_PCT ? "down" : (last.e < -BASIS_THRESHOLD_PCT ? "up" : "neutral")}`;
-      if (cp && cp.sd > 0) {
-        const z = (last.e - cp.mu) / cp.sd;
-        sEl.innerText = `${cp.sd.toFixed(3)}%`;
-        zEl.innerText = `${sgn(z, 1)}σ`;
-        zEl.className = `stat-v ${Math.abs(z) >= 2 ? (z > 0 ? "down" : "up") : "neutral"}`;
+      nowEl.className = `stat-v ${stale ? "neutral" : (last.e > thr ? "down" : (last.e < -thr ? "up" : "neutral"))}`;
+      sEl.innerText = cp && cp.sd > 0 ? `${cp.sd.toFixed(3)}%` : "–";
+
+      // Spread quoted in ONE-DAY sigmas, deliberately NOT scaled by elapsed time. Dividing by
+      // the cone sigma at this hour would call a 0.1% move "2 sigma" at 19:00 and "0.2 sigma"
+      // at 15:00 - the same trade, two different numbers, no use for sizing. The grey band on
+      // the chart already carries the hour-conditional context visually; this number is the
+      // risk unit, comparable across the session and across pairs.
+      const sd1 = m.stats.sdDaily;
+      if (sd1 > 0) {
+        const zd = last.e / sd1;
+        zEl.innerText = `${sgn(zd, 2)}σ${stale ? " ·stale" : ""}`;
+        zEl.className = `stat-v ${!stale && Math.abs(zd) >= 1 ? (zd > 0 ? "down" : "up") : "neutral"}`;
       } else {
-        sEl.innerText = "–"; zEl.innerText = "–"; zEl.className = "stat-v neutral";
+        zEl.innerText = "–"; zEl.className = "stat-v neutral";
       }
     }
 
-    async function loadModelHistory() {
-      if (modelLoading) return;
-      const s = marketMap["SOXL"], x = marketMap["XYZ100"];
+    async function loadModelHistory(pairKey) {
+      if (modelLoading[pairKey]) return;
+      const pair = PAIRS[pairKey];
+      const s = marketMap[pair.target], x = marketMap[pair.bench];
       const note = document.getElementById("mv-cone-note");
-      if (!s || !x) { note.innerText = "SOXL or XYZ100 is not listed on any of the configured venues."; return; }
-      modelLoading = true;
-      if (!modelState) note.innerText = "Loading 15m history for both legs…";
+      if (!s || !x) {
+        note.innerText = `${!s ? pair.target : pair.bench} is not listed on any of the configured venues.`;
+        return;
+      }
+      modelLoading[pairKey] = true;
+      if (!modelStates[pairKey]) note.innerText = "Loading 15m history for both legs…";
       try {
         const [hs, hx] = await Promise.all([fetchCandles(s.fullName, 60), fetchCandles(x.fullName, 60)]);
         const idxS = indexCandles(hs), idxX = indexCandles(hx);
-        const m = buildModel(mergeArchive("SOXL", idxS.anchors), mergeArchive("XYZ100", idxX.anchors), idxS, idxX);
-        m.idxS = idxS; m.idxX = idxX;
+        const m = buildModel(mergeArchive(pair.target, idxS.anchors), mergeArchive(pair.bench, idxX.anchors),
+                             idxS, idxX, pair.lev, pair.beta);
+        m.idxS = idxS; m.idxX = idxX; m.pair = pair; m.lev = pair.lev; m.beta = pair.beta;
         const dates = Object.keys(idxS.anchorMs).filter(d => idxX.anchorMs[d] != null && isTradingDay(d)).sort();
         m.todayAnchor = dates[dates.length - 1];
         if (!m.todayAnchor || m.clean.length < 3) {
           note.innerText = `Not enough overlapping history yet (${m.clean.length} complete periods).`;
-          modelState = null;
+          delete modelStates[pairKey];
         } else {
-          modelState = m;
-          renderModelView();
+          modelStates[pairKey] = m;
+          if (currentView === "model" && activePairKey === pairKey) renderModelView();
         }
       } catch (e) {
         note.innerText = `History fetch failed: ${e}`;
       } finally {
-        modelLoading = false;
+        modelLoading[pairKey] = false;
       }
     }
 
@@ -1211,13 +1556,16 @@
       document.getElementById("model-view").style.display = "block";
       currentView = "model";
       window.scrollTo(0, 0);
-      loadModelHistory();
+      // Redraw a cached pair immediately so switching back is not a blank frame; the refetch
+      // then folds in any candles that closed since.
+      if (modelStates[activePairKey]) renderModelView();
+      loadModelHistory(activePairKey);
     }
 
     function closeModelView() {
       document.getElementById("model-view").style.display = "none";
       document.getElementById("detail-view").style.display = "block";
-      currentView = "soxl";
+      currentView = "detail";
       isDirty = true;
       flushUpdatesToDOM();
     }
@@ -1259,10 +1607,13 @@
                 fullName: uName,
                 baseName: base,
                 dex: dex || "main",
+                dexParam: dex,            // raw value the API wants back ("" for the main dex)
                 dexRank: dexRank,
                 delisted: !!universe[i].isDelisted,
                 livePrice: mark,
                 oraclePrice: oracle,
+                funding: parseFloat(ctxs[i].funding || 0),   // per HOUR, signed: +ve = longs pay
+                oracleMs: Date.now(),
                 volume: parseFloat(ctxs[i].dayNtlVlm || 0),
                 rawPct: NaN,
                 closePrice: prev,
@@ -1345,13 +1696,17 @@
           `;
           
           for (let item of rowData) {
-            let onClickAction = item.baseName === "SOXL" ? `onclick="openSoxlView(event)"` : `href="https://app.hyperliquid.xyz/trade/${item.fullName}" target="_blank"`;
-            let tag = item.baseName === "SOXL" ? "div" : "a";
-            
+            // A pair target opens its own detail view; everything else links straight to HL.
+            let isPair = !!PAIRS[item.baseName.toUpperCase()];
+            let tag = isPair ? "div" : "a";
+            let attrs = isPair
+              ? `onclick="openDetail('${item.baseName.toUpperCase()}', event)"`
+              : `href="https://app.hyperliquid.xyz/trade/${item.fullName}" target="_blank"`;
+
             mainHtml += `
-              <${tag} ${onClickAction} class="row">
+              <${tag} ${attrs} class="row">
                 <div class="ticker">
-                  <span class="ticker-name">${item.baseName}</span>
+                  <span class="ticker-name">${item.baseName}${isPair ? ' <span style="color: var(--accent)">›</span>' : ''}</span>
                   <span class="ticker-vol">${item.dex} · ${formatVolume(item.volume)} 24h · <span id="age-${item.baseName}">–</span></span>
                 </div>
                 <div class="price" id="px-${item.baseName}">-</div>
@@ -1366,24 +1721,7 @@
       document.getElementById("loading").style.display = "none";
       document.getElementById("content").innerHTML = mainHtml;
 
-      let hwHtml = "";
-      hwTickers.forEach(k => {
-         let item = marketMap[k];
-         if (item) {
-             hwHtml += `
-              <a href="https://app.hyperliquid.xyz/trade/${item.fullName}" target="_blank" class="row">
-                <div class="ticker">
-                  <span class="ticker-name">${item.baseName}</span>
-                  <span class="ticker-vol">${item.dex} · <span id="dt-age-${item.baseName}">–</span></span>
-                </div>
-                <div class="price" id="dt-px-${item.baseName}">-</div>
-                <div class="ret" id="dt-ret-${item.baseName}">-</div>
-              </a>
-             `;
-         }
-      });
-      document.getElementById("heavyweights-list").innerHTML = hwHtml;
-
+      // The heavyweights list is per-pair and built by openDetail(), not here.
       cacheDOMPointers();
       isDirty = true; 
       flushUpdatesToDOM();
