@@ -219,6 +219,20 @@
         <!-- Injected by JS, rebuilt per pair on open -->
       </div>
     </div>
+
+    <div class="detail-section">
+      <div class="detail-title">XYZ100 − SP500 Spread Implication</div>
+      <div class="basis-card">
+        <div class="basis-sub">
+          Regression of the 4 PM ET close-to-close XYZ100 − 1.3×SP500 spread on each
+          instrument's move. Expected spread uses the instrument's current move.
+        </div>
+        <div class="basis-meta" id="dt-spread-formula" style="margin-top: 8px;">
+          Expected spread = α + βspread × current instrument move
+        </div>
+        <div id="dt-spread-table" style="overflow-x: auto; margin-top: 8px;"></div>
+      </div>
+    </div>
   </div>
 
   <!-- MODEL ERROR VIEW -->
@@ -291,6 +305,8 @@
     const DEX_LIST = ["xyz", "para", "mkts", "io", ""];
 
     const CANDLE_MS = 15 * 60 * 1000;
+    const HISTORY_DAYS = 140;                // ~90 NYSE trading days after weekends/holidays
+    const CANDLE_CHUNK_DAYS = 45;            // stays below Hyperliquid's ~5,000-candle cap
     const CACHE_PREFIX = "hl_close_v2_";   // v2: v1 caches hold the wrong (16:15) baseline
     const STALE_WARN_MS = 60 * 1000;
     const STALE_BAD_MS = 5 * 60 * 1000;
@@ -301,10 +317,11 @@
     // view are generic and share one set of DOM nodes; adding a pair here is the only edit
     // needed to get both views for it.
     //
-    //   err = r_target / lev  -  beta * r_bench      (per rebalance period)
+    //   err = r_target / targetLev  -  beta * r_bench / benchLev  (per rebalance period)
     //
-    // lev is the target's structural leverage (SOXL resets to 3x at every NAV strike), so the
-    // divide is a de-levering, not a scaling choice. beta is the model multiplier and is held
+    // targetLev is the target's structural leverage (SOXL resets to 3x at every NAV strike), so
+    // the divide is a de-levering, not a scaling choice. benchLev optionally de-levers the
+    // benchmark first (for example, DRAM uses SOXL/3). beta is the model multiplier and is held
     // FIXED live - the fitted beta is reported in Diagnostics only, never fed back. A beta
     // that moved yesterday would make today's z-score incomparable to yesterday's.
     //
@@ -373,7 +390,7 @@
     // the same thing across every pair. SOXL and XYZ100 keep their hand-set % values below -
     // those are live traded numbers and are not mine to change silently.
     const THR_SIGMA = 0.5;
-    const SEMIS_PEERS = ["NVDA", "AMD", "MU", "INTC", "TSM", "AVGO", "MRVL", "WDC", "ARM",
+    const SEMIS_PEERS = ["NVDA", "AMD", "MU", "DRAM", "INTC", "TSM", "AVGO", "MRVL", "WDC", "ARM",
                          "SMSN", "SKHX", "SKHY", "SOXL"];
 
     for (const [tkr, [b, sd]] of Object.entries(SEMIS_FIT)) {
@@ -386,6 +403,16 @@
         betaStory: `shrunk toward the 2.0 semis-sector beta; 1-day residual σ ${sd}%`
       };
     }
+
+    // DRAM is modelled against SOXL's unlevered return, rather than directly against XYZ100.
+    // The 1.5 multiplier is held fixed live; the recent 1-day residual σ is ~2.0%, giving a
+    // 1.0% economic threshold on the same 0.5σ rule used by the other names.
+    PAIRS.DRAM = {
+      target: "DRAM", bench: "SOXL", benchLev: 3, lev: 1, beta: 1.5, threshold: 1.00,
+      title: "DRAM ANALYSIS", macro: ["XYZ100", "SOXL"],
+      heavies: SEMIS_PEERS, heaviesTitle: "Semis Peers",
+      betaStory: "DRAM vs unlevered SOXL (SOXL/3), with the live beta held at 1.5"
+    };
 
     // Human labels for the macro strip. Anything absent falls back to the bare ticker.
     const NICE_NAME = {
@@ -417,7 +444,7 @@
         { name: "Commodities & Rates", tickers: ["NATGAS", "COPPER", "CL", "GOLD", "TLT"] }
       ]},
       { category: "THEMATICS", subgroups: [
-        { name: "Semiconductors & Equipment", tickers: ["NVDA", "AMD", "TSM", "AVGO", "INTC", "MU",
+        { name: "Semiconductors & Equipment", tickers: ["NVDA", "AMD", "TSM", "AVGO", "INTC", "MU", "DRAM",
                                                         "MRVL", "WDC", "ARM", "SMSN", "SKHX", "SKHY", "SOXL"] },
         { name: "AI & Mega-Cap Tech", tickers: ["AAPL", "GOOGL", "META", "AMZN", "MSFT", "TSLA", "PLTR"] },
         { name: "Crypto & On-Chain", tickers: ["MSTR", "COIN", "IREN", "HOOD"] }
@@ -596,17 +623,205 @@
       }
     }
 
-    function rowHtml(item, idPrefix) {
+    function rowHtml(item, idPrefix, corr, beta, target) {
       const pxStr = fmtPx(item.livePrice);
+      const pair = PAIRS[item.baseName.toUpperCase()];
+      const corrTxt = isFinite(corr) ? ` · ρ ${corr.toFixed(2)}` : "";
+      const betaTxt = isFinite(beta) ? ` · β→${target} ${beta.toFixed(2)}` : "";
+      const modelTxt = pair
+        ? ` · model ${pair.bench}${pair.benchLev > 1 ? "/" + pair.benchLev : ""} × ${trimNum(pair.beta)}`
+        : "";
+      const tag = pair ? "div" : "a";
+      const attrs = pair
+        ? `onclick="openPeerModel('${item.baseName.toUpperCase()}', event)" role="button" tabindex="0"`
+        : `href="https://app.hyperliquid.xyz/trade/${item.fullName}" target="_blank"`;
       return `
-        <a href="https://app.hyperliquid.xyz/trade/${item.fullName}" target="_blank" class="row">
+        <${tag} ${attrs} class="row">
           <div class="ticker">
             <span class="ticker-name">${item.baseName}</span>
-            <span class="ticker-vol">${item.dex} · <span id="${idPrefix}age-${item.baseName}">–</span></span>
+            <span class="ticker-vol">${item.dex}${corrTxt}${betaTxt}${modelTxt} · <span id="${idPrefix}age-${item.baseName}">–</span></span>
           </div>
           <div class="price" id="${idPrefix}px-${item.baseName}">-</div>
           <div class="ret" id="${idPrefix}ret-${item.baseName}">-</div>
-        </a>`;
+        </${tag}>`;
+    }
+
+    function openPeerModel(pairKey, e) {
+      if (e) e.preventDefault();
+      openDetail(pairKey, e);
+      openModelView();
+    }
+
+    let spreadRegressions = {};
+
+    function fitSpreadRegression(stock, xyz, spx) {
+      const dates = Object.keys(stock)
+        .filter(d => d in xyz && d in spx && isTradingDay(d)).sort();
+      const xs = [], ys = [];
+      const spreadBeta = PAIRS.XYZ100.beta;
+      for (let i = 1; i < dates.length; i++) {
+        const d0 = dates[i - 1], d1 = dates[i];
+        const stockRet = stock[d1] / stock[d0] - 1;
+        const spreadRet = (xyz[d1] / xyz[d0] - 1)
+          - spreadBeta * (spx[d1] / spx[d0] - 1);
+        if (isFinite(stockRet) && isFinite(spreadRet)) {
+          xs.push(stockRet); ys.push(spreadRet);
+        }
+      }
+      if (xs.length < 3) return null;
+      const mx = xs.reduce((s, v) => s + v, 0) / xs.length;
+      const my = ys.reduce((s, v) => s + v, 0) / ys.length;
+      let sxx = 0, sxy = 0, tss = 0, rss = 0;
+      for (let i = 0; i < xs.length; i++) {
+        const dx = xs[i] - mx, dy = ys[i] - my;
+        sxx += dx * dx; sxy += dx * dy; tss += dy * dy;
+      }
+      if (!(sxx > 0)) return null;
+      const beta = sxy / sxx, alpha = my - beta * mx;
+      for (let i = 0; i < xs.length; i++) {
+        rss += (ys[i] - alpha - beta * xs[i]) ** 2;
+      }
+      return {
+        alphaPct: alpha * 100, beta, r2: tss > 0 ? 1 - rss / tss : NaN, n: xs.length
+      };
+    }
+
+    function expectedSpread(reg, movePct) {
+      return reg && isFinite(movePct) ? reg.alphaPct + reg.beta * movePct : NaN;
+    }
+
+    function updateSpreadImplications(pairKey) {
+      const pair = PAIRS[pairKey], regressions = spreadRegressions[pairKey] || {};
+      if (!pair) return;
+      for (const key of pair.heavies) {
+        const upper = key.toUpperCase(), reg = regressions[upper], item = marketMap[upper];
+        const liveMove = item ? item.rawPct : NaN;
+        const expected = expectedSpread(reg, liveMove);
+        const moveEl = document.getElementById(`dt-spread-live-${upper}`);
+        const spreadEl = document.getElementById(`dt-spread-value-${upper}`);
+        if (moveEl) moveEl.innerText = isFinite(liveMove) ? `${liveMove >= 0 ? "+" : ""}${liveMove.toFixed(2)}%` : "–";
+        if (spreadEl) {
+          spreadEl.innerText = isFinite(expected) ? `${expected >= 0 ? "+" : ""}${expected.toFixed(2)}%` : "–";
+          spreadEl.style.color = isFinite(expected)
+            ? (expected >= 0 ? "var(--up)" : "var(--down)") : "var(--text-dim)";
+        }
+      }
+    }
+
+    function renderSpreadImplications(pairKey) {
+      const pair = PAIRS[pairKey], regressions = spreadRegressions[pairKey] || {};
+      const table = document.getElementById("dt-spread-table");
+      if (!pair || !table) return;
+      table.innerHTML = `<table class="dt"><tr><th>STOCK</th><th>LIVE MOVE</th>`
+        + `<th>βspread</th><th>α</th><th>EXPECTED SPREAD</th><th>R² / N</th></tr>`
+        + pair.heavies.map(key => {
+          const upper = key.toUpperCase(), reg = regressions[upper];
+          return `<tr><td>${upper}</td>`
+            + `<td id="dt-spread-live-${upper}">–</td>`
+            + `<td>${reg && isFinite(reg.beta) ? reg.beta.toFixed(2) : "–"}</td>`
+            + `<td>${reg && isFinite(reg.alphaPct) ? `${reg.alphaPct >= 0 ? "+" : ""}${reg.alphaPct.toFixed(2)}%` : "–"}</td>`
+            + `<td id="dt-spread-value-${upper}">–</td>`
+            + `<td>${reg && isFinite(reg.r2) ? `${reg.r2.toFixed(2)} / ${reg.n}` : "–"}</td></tr>`;
+        }).join("") + `</table>`;
+      const formula = document.getElementById("dt-spread-formula");
+      if (formula) formula.innerText = `expected spread = α + βspread × current 4 PM move · spread = XYZ100 − ${trimNum(PAIRS.XYZ100.beta)}×SP500`;
+      updateSpreadImplications(pairKey);
+    }
+
+    let peerCorrelations = {}, peerCorrelationLoading = {};
+
+    function anchorStats(a, b) {
+      const dates = Object.keys(a).filter(d => d in b && isTradingDay(d)).sort();
+      const xs = [], ys = [];
+      for (let i = 1; i < dates.length; i++) {
+        const d0 = dates[i - 1], d1 = dates[i];
+        const targetRet = a[d1] / a[d0] - 1, peerRet = b[d1] / b[d0] - 1;
+        if (isFinite(targetRet) && isFinite(peerRet)) { xs.push(targetRet); ys.push(peerRet); }
+      }
+      if (xs.length < 3) return null;
+      const mx = xs.reduce((s, v) => s + v, 0) / xs.length;
+      const my = ys.reduce((s, v) => s + v, 0) / ys.length;
+      let sxx = 0, syy = 0, sxy = 0;
+      for (let i = 0; i < xs.length; i++) {
+        const dx = xs[i] - mx, dy = ys[i] - my;
+        sxx += dx * dx; syy += dy * dy; sxy += dx * dy;
+      }
+      return sxx > 0 && syy > 0
+        ? { corr: sxy / Math.sqrt(sxx * syy), beta: sxy / sxx, n: xs.length }
+        : null;
+    }
+
+    function renderHeavyweights(pairKey) {
+      const pair = PAIRS[pairKey];
+      const stats = peerCorrelations[pairKey] || {};
+      const ranked = pair.heavies.map((key, index) => ({ key, index, stats: stats[key.toUpperCase()] }))
+        .sort((a, b) => {
+          const af = a.stats && isFinite(a.stats.corr), bf = b.stats && isFinite(b.stats.corr);
+          if (af !== bf) return af ? -1 : 1;
+          return af ? (b.stats.corr - a.stats.corr) : (a.index - b.index);
+        });
+      let html = "";
+      for (const entry of ranked) {
+        const item = marketMap[entry.key.toUpperCase()];
+        if (item) {
+          const stat = entry.stats || {};
+          html += rowHtml(item, "dt-", stat.corr, stat.beta, pair.target);
+        }
+      }
+      document.getElementById("heavyweights-list").innerHTML =
+        html || `<div class="chart-note">None of this pair's constituents are listed.</div>`;
+      cacheHeavyPointers(pair);
+    }
+
+    async function loadPeerCorrelations(pairKey) {
+      if (peerCorrelationLoading[pairKey] || peerCorrelations[pairKey]) return;
+      const pair = PAIRS[pairKey];
+      const names = [...new Set([
+        pair.target, "XYZ100", "SP500", ...pair.heavies.map(k => k.toUpperCase())
+      ])];
+      const fetchable = names.filter(k => marketMap[k]);
+      if (!fetchable.length) return;
+      peerCorrelationLoading[pairKey] = true;
+      try {
+        const settled = await Promise.allSettled(fetchable.map(async key => {
+          const hist = await fetchCandles(marketMap[key].fullName, HISTORY_DAYS);
+          return [key, indexCandles(hist).anchors];
+        }));
+        const anchors = {};
+        for (const result of settled) {
+          if (result.status === "fulfilled") {
+            const [key, fresh] = result.value;
+            // Keep the same per-name archive used by model history. Hyperliquid's rolling
+            // intraday window cannot provide 90 trading days in one visit, so correlation
+            // grows toward that horizon as the dashboard is opened over time.
+            anchors[key] = mergeArchive(key, fresh);
+          }
+        }
+        const targetAnchors = anchors[pair.target];
+        const result = {};
+        if (targetAnchors) {
+          for (const key of pair.heavies) {
+            const peerAnchors = anchors[key.toUpperCase()];
+            if (peerAnchors) result[key.toUpperCase()] = anchorStats(targetAnchors, peerAnchors);
+          }
+        }
+        peerCorrelations[pairKey] = result;
+        const spreadResult = {};
+        if (anchors.XYZ100 && anchors.SP500) {
+          for (const key of pair.heavies) {
+            const stockAnchors = anchors[key.toUpperCase()];
+            if (stockAnchors) spreadResult[key.toUpperCase()] =
+              fitSpreadRegression(stockAnchors, anchors.XYZ100, anchors.SP500);
+          }
+        }
+        spreadRegressions[pairKey] = spreadResult;
+        if (currentView === "detail" && activePairKey === pairKey) {
+          renderHeavyweights(pairKey);
+          renderSpreadImplications(pairKey);
+        }
+      } finally {
+        peerCorrelationLoading[pairKey] = false;
+      }
     }
 
     // Static labels are written once here so flushUpdatesToDOM only ever writes values, which
@@ -628,10 +843,12 @@
         `${pair.lev > 1 ? "UNLEV " : ""}${pair.target} vs MODEL SPREAD`;
       document.getElementById("dt-tgt-label").innerText =
         pair.lev > 1 ? `Unlev ${pair.target} (Ret/${pair.lev})` : pair.target;
-      document.getElementById("dt-model-label").innerText = `Model (${pair.bench} × ${bStr})`;
+      document.getElementById("dt-model-label").innerText =
+        `Model (${pair.bench}${pair.benchLev > 1 ? "/" + pair.benchLev : ""} × ${bStr})`;
       document.getElementById("dt-book-title").innerText =
         `${pair.target} L2 Microstructure (Top 5 Levels)`;
-      document.getElementById("dt-heavies-title").innerText = pair.heaviesTitle;
+      document.getElementById("dt-heavies-title").innerText =
+        `${pair.heaviesTitle} · ranked by ρ to ${pair.target}`;
 
       // The raw-return row only says something distinct when there is leverage to strip out.
       // Blank it when hidden rather than leaving the other pair's numbers parked in it.
@@ -644,14 +861,9 @@
       trade.href = tgt ? `https://app.hyperliquid.xyz/trade/${tgt.fullName}` : "#";
       trade.innerText = tgt ? `open ${tgt.fullName} on Hyperliquid ›` : "not listed";
 
-      let hwHtml = "";
-      for (const k of pair.heavies) {
-        const item = marketMap[k.toUpperCase()];
-        if (item) hwHtml += rowHtml(item, "dt-");
-      }
-      document.getElementById("heavyweights-list").innerHTML =
-        hwHtml || `<div class="chart-note">None of this pair's constituents are listed.</div>`;
-      cacheHeavyPointers(pair);
+      renderHeavyweights(pairKey);
+      loadPeerCorrelations(pairKey);
+      renderSpreadImplications(pairKey);
 
       document.getElementById("main-view").style.display = "none";
       document.getElementById("detail-view").style.display = "block";
@@ -699,7 +911,7 @@
             retVal = item.rawPct / pair.lev;
             let bench = marketMap[pair.bench];
             if (bench) {
-              outperfVal = retVal - (bench.rawPct * pair.beta);
+                outperfVal = retVal - (bench.rawPct / (pair.benchLev || 1) * pair.beta);
               // A basis is only as fresh as its stalest leg. The detail view already gates on
               // both; without this the list would colour a confident basis off a dead hedge.
               benchDead = ageOf(bench) > STALE_BAD_MS;
@@ -757,7 +969,8 @@
 
         if (tgt && bench) {
            let tgtRet = tgt.rawPct / pair.lev;
-           let modelRet = bench.rawPct * pair.beta;
+            let benchLev = pair.benchLev || 1;
+            let modelRet = bench.rawPct / benchLev * pair.beta;
            let basis = tgtRet - modelRet;
 
            // FIX 5: the basis is a small number built from two live mids and two
@@ -771,11 +984,11 @@
            // them comparable. basis is in unlevered %, so the hurdle re-levers: 0.15%
            // unlevered on SOXL is 45bp of SOXL price, not 15bp.
            //
-           // The hedge ratio follows from the basis definition, and it carries the leverage:
-           //   b = r_T/L − β·r_B   =>   r_T = L·b + L·β·r_B
-           // so a $100 SOXL short needs $600 of XYZ100 (L·β = 6) to cancel r_B, not $200.
-           // The bench spread is therefore paid on L·β of notional, not β.
-           let costBps = isFinite(sT) && isFinite(sB) ? sT + pair.lev * pair.beta * sB : NaN;
+            // The hedge ratio follows from the basis definition:
+            //   b = r_T/targetLev − β·r_B/benchLev
+            // so the benchmark spread is paid on targetLev·β/benchLev of notional.
+            let costBps = isFinite(sT) && isFinite(sB)
+              ? sT + pair.lev * pair.beta / benchLev * sB : NaN;
            let hurdleBps = pair.threshold * pair.lev * 100;
 
            let reasons = [];
@@ -807,7 +1020,7 @@
            // the anchor cancels out. There is no oracle-history endpoint, so we cannot know how
            // much of today's gap is new - which makes the honest statement an upper bound:
            // if the whole gap appeared since the anchor, it would account for
-           //   (gap_T/lev - beta*gap_B)  of the basis.
+            //   (gap_T/targetLev - beta*gap_B/benchLev)  of the basis.
            // That is reported as a share of the threshold so it is comparable to the signal.
            let gapBp = (it) => (it && it.oraclePrice > 0 && it.livePrice > 0)
              ? (it.livePrice / it.oraclePrice - 1) * 10000 : NaN;
@@ -815,7 +1028,8 @@
            let fnd = (it) => it && isFinite(it.funding) ? it.funding * 24 * 365 * 100 : NaN;
            let leg = (nm, g, f) => `${nm} ${isFinite(g) ? sgn(g, 1) + "bp" : "–"}`
                                  + `${isFinite(f) ? ` fnd ${sgn(f, 0)}%/yr` : ""}`;
-           let maxContam = (isFinite(gT) && isFinite(gB)) ? (gT / pair.lev - pair.beta * gB) / 100 : NaN;
+            let maxContam = (isFinite(gT) && isFinite(gB))
+              ? (gT / pair.lev - pair.beta * gB / benchLev) / 100 : NaN;
            let contamShare = isFinite(maxContam) ? Math.abs(maxContam) / pair.threshold * 100 : NaN;
            let pEl = document.getElementById("dt-perp");
            // Signed, deliberately: the sign says which way the perp effect pushes the basis.
@@ -894,6 +1108,7 @@
               }
            }
         });
+         updateSpreadImplications(activePairKey);
       }
       else if (currentView === "model") {
         updateModelLive();
@@ -1052,7 +1267,7 @@
     }
 
     // ======================= MODEL ERROR HISTORY =======================
-    // e = r_target/lev - beta*r_bench, computed per rebalance period.
+    // e = r_target/targetLev - beta*r_bench/benchLev, computed per rebalance period.
     //
     // A levered ETF resets to its stated leverage at every NAV strike, so the 3x claim
     // holds for ONE period only. De-levering therefore happens per period BEFORE any
@@ -1104,11 +1319,23 @@
     }
 
     async function fetchCandles(coin, days) {
-      const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "candleSnapshot", req: { coin, interval: "15m",
-          startTime: Date.now() - days * 86400000, endTime: Date.now() } }) });
-      const h = await res.json();
-      return Array.isArray(h) ? h : [];
+      const now = Date.now(), floor = now - days * 86400000;
+      const ranges = [];
+      for (let end = now; end > floor; end -= CANDLE_CHUNK_DAYS * 86400000) {
+        ranges.push({
+          startTime: Math.max(floor, end - CANDLE_CHUNK_DAYS * 86400000),
+          endTime: end
+        });
+      }
+      const chunks = await Promise.all(ranges.map(async range => {
+        const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "candleSnapshot", req: { coin, interval: "15m", ...range } }) });
+        const h = await res.json();
+        return Array.isArray(h) ? h : [];
+      }));
+      const unique = new Map();
+      for (const chunk of chunks) for (const candle of chunk) unique.set(Number(candle.t), candle);
+      return [...unique.values()].sort((a, b) => Number(a.t) - Number(b.t));
     }
 
     function indexCandles(hist) {
@@ -1134,7 +1361,8 @@
       return leg;
     }
 
-    function buildModel(archS, archX, idxS, idxX, lev, beta) {
+    function buildModel(archS, archX, idxS, idxX, lev, beta, benchLev) {
+      benchLev = benchLev || 1;
       const grid = Object.keys(archS).filter(d => (d in archX) && isTradingDay(d)).sort();
 
       const rows = [];
@@ -1144,8 +1372,9 @@
         if (!isFinite(rs) || !isFinite(rx)) continue;
         rows.push({
           from: a, to: b, gap: dayGap(a, b),
-          rTgt: rs * 100, unlev: rs / lev * 100, rBench: rx * 100, model: beta * rx * 100,
-          err: (rs / lev - beta * rx) * 100,
+          rTgt: rs * 100, unlev: rs / lev * 100, rBench: rx / benchLev * 100,
+          model: beta * rx / benchLev * 100,
+          err: (rs / lev - beta * rx / benchLev) * 100,
           half: NYSE_HALFDAYS.has(a) || NYSE_HALFDAYS.has(b)
         });
       }
@@ -1200,7 +1429,8 @@
           if (!(sp > 0) || !(xp > 0)) continue;
           const k = Math.round((t - aMs) / CANDLE_MS);
           if (!bucket.has(k)) bucket.set(k, []);
-          bucket.get(k).push(((sp / s0 - 1) / lev - beta * (xp / x0 - 1)) * 100);
+           bucket.get(k).push(((sp / s0 - 1) / lev
+             - beta * (xp / x0 - 1) / benchLev) * 100);
         }
       }
       const cone = (m) => {
@@ -1221,11 +1451,12 @@
       if (aMs == null) return pts;
       const s0 = m.idxS.px.get(aMs), x0 = m.idxX.px.get(aMs);
       if (!(s0 > 0) || !(x0 > 0)) return pts;
-      const lev = m.lev, beta = m.beta;
+      const lev = m.lev, beta = m.beta, benchLev = m.benchLev || 1;
       for (let t = aMs; t <= Date.now(); t += CANDLE_MS) {
         const sp = m.idxS.px.get(t), xp = m.idxX.px.get(t);
         if (!(sp > 0) || !(xp > 0)) continue;
-        pts.push({ k: Math.round((t - aMs) / CANDLE_MS), e: ((sp / s0 - 1) / lev - beta * (xp / x0 - 1)) * 100 });
+         pts.push({ k: Math.round((t - aMs) / CANDLE_MS),
+                    e: ((sp / s0 - 1) / lev - beta * (xp / x0 - 1) / benchLev) * 100 });
       }
       // Live tip from the current mids, fresher than the last closed candle - but ONLY while
       // both legs are actually quoting. Plotting a stale mid at the current elapsed time draws
@@ -1234,8 +1465,9 @@
       const s = marketMap[m.pair.target], x = marketMap[m.pair.bench];
       if (s && x && s.livePrice > 0 && x.livePrice > 0
           && Math.max(ageOf(s), ageOf(x)) <= STALE_WARN_MS) {
-        pts.push({ k: (Date.now() - aMs) / CANDLE_MS,
-                   e: ((s.livePrice / s0 - 1) / lev - beta * (x.livePrice / x0 - 1)) * 100, live: true });
+         pts.push({ k: (Date.now() - aMs) / CANDLE_MS,
+                    e: ((s.livePrice / s0 - 1) / lev
+                      - beta * (x.livePrice / x0 - 1) / benchLev) * 100, live: true });
       }
       return pts;
     }
@@ -1381,7 +1613,8 @@
 
       const st = m.stats;
       document.getElementById("mv-formula").innerText =
-        `${pair.target}${pair.lev > 1 ? "/" + pair.lev : ""} − ${pair.bench}×${bStr}`;
+        `${pair.target}${pair.lev > 1 ? "/" + pair.lev : ""} − `
+        + `${pair.bench}${pair.benchLev > 1 ? "/" + pair.benchLev : ""}×${bStr}`;
       document.getElementById("mv-bars-title").innerText =
         `Daily ${pair.lev > 1 ? "unlevered " : ""}error, close → close`;
       document.getElementById("mv-lg-rich").innerText = `${pair.target} rich`;
@@ -1432,12 +1665,13 @@
         : "Not enough history yet for a beta estimate.";
 
       // table-view twin. The unlev column is only distinct from the raw return when lev > 1.
+      const benchLabel = `${pair.bench}${pair.benchLev > 1 ? "/" + pair.benchLev : ""}`;
       const cols = pair.lev > 1
         ? [["to", r => r.to.slice(5) + (r.gap > 1 ? "*" : "")], [pair.target, r => sgn(r.rTgt, 2)],
-           ["unlev", r => sgn(r.unlev, 3)], [pair.bench, r => sgn(r.rBench, 2)],
+            ["unlev", r => sgn(r.unlev, 3)], [benchLabel, r => sgn(r.rBench, 2)],
            ["model", r => sgn(r.model, 3)]]
         : [["to", r => r.to.slice(5) + (r.gap > 1 ? "*" : "")], [pair.target, r => sgn(r.rTgt, 2)],
-           [pair.bench, r => sgn(r.rBench, 2)], ["model", r => sgn(r.model, 3)]];
+            [benchLabel, r => sgn(r.rBench, 2)], ["model", r => sgn(r.model, 3)]];
       let t = `<table class="dt"><tr>${cols.map(c => `<th>${c[0]}</th>`).join("")}<th>err</th></tr>`;
       for (const r of m.clean.slice().reverse()) {
         t += `<tr>${cols.map(c => `<td>${c[1](r)}</td>`).join("")}`
@@ -1530,11 +1764,14 @@
       modelLoading[pairKey] = true;
       if (!modelStates[pairKey]) note.innerText = "Loading 15m history for both legs…";
       try {
-        const [hs, hx] = await Promise.all([fetchCandles(s.fullName, 60), fetchCandles(x.fullName, 60)]);
+        const [hs, hx] = await Promise.all([
+          fetchCandles(s.fullName, HISTORY_DAYS), fetchCandles(x.fullName, HISTORY_DAYS)
+        ]);
         const idxS = indexCandles(hs), idxX = indexCandles(hx);
         const m = buildModel(mergeArchive(pair.target, idxS.anchors), mergeArchive(pair.bench, idxX.anchors),
-                             idxS, idxX, pair.lev, pair.beta);
-        m.idxS = idxS; m.idxX = idxX; m.pair = pair; m.lev = pair.lev; m.beta = pair.beta;
+                             idxS, idxX, pair.lev, pair.beta, pair.benchLev);
+        m.idxS = idxS; m.idxX = idxX; m.pair = pair; m.lev = pair.lev;
+        m.beta = pair.beta; m.benchLev = pair.benchLev || 1;
         const dates = Object.keys(idxS.anchorMs).filter(d => idxX.anchorMs[d] != null && isTradingDay(d)).sort();
         m.todayAnchor = dates[dates.length - 1];
         if (!m.todayAnchor || m.clean.length < 3) {
