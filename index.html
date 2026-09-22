@@ -220,16 +220,17 @@
       </div>
     </div>
 
-    <div class="detail-section">
-      <div class="detail-title">XYZ100 − SP500 Spread Implication</div>
+    <div class="detail-section" id="dt-spread-section">
+      <div class="detail-title" id="dt-spread-title">Spread Implication</div>
       <div class="basis-card">
-        <div class="basis-sub">
-          Regression of the 4 PM ET close-to-close XYZ100 − 1.3×SP500 spread on each
-          instrument's move. Expected spread uses the instrument's current move.
-        </div>
+        <div class="basis-sub" id="dt-spread-description">Testing tracked instruments…</div>
         <div class="basis-meta" id="dt-spread-formula" style="margin-top: 8px;">
-          Expected spread = α + βspread × current instrument move
+          Expected spread = βspread × current instrument move
         </div>
+        <div class="basis-divider"></div>
+        <div class="basis-label">Joint ridge estimate</div>
+        <div class="basis-spread neutral" id="dt-spread-overall">–</div>
+        <div class="basis-sub" id="dt-spread-joint-meta">Building time-series validation…</div>
         <div id="dt-spread-table" style="overflow-x: auto; margin-top: 8px;"></div>
       </div>
     </div>
@@ -307,6 +308,11 @@
     const CANDLE_MS = 15 * 60 * 1000;
     const HISTORY_DAYS = 140;                // ~90 NYSE trading days after weekends/holidays
     const CANDLE_CHUNK_DAYS = 45;            // stays below Hyperliquid's ~5,000-candle cap
+    const SPREAD_SCREEN_MIN_N = 15;
+    const SPREAD_SCREEN_MIN_R2 = 0.05;
+    const HISTORY_FETCH_CONCURRENCY = 6;
+    const JOINT_MIN_COVERAGE = 0.80;
+    const JOINT_HALF_LIFE = 40;
     const CACHE_PREFIX = "hl_close_v2_";   // v2: v1 caches hold the wrong (16:15) baseline
     const STALE_WARN_MS = 60 * 1000;
     const STALE_BAD_MS = 5 * 60 * 1000;
@@ -653,82 +659,356 @@
     }
 
     let spreadRegressions = {};
+    let spreadJointModels = {};
+    let spreadScreenReady = false;
 
-    function fitSpreadRegression(stock, xyz, spx) {
-      const dates = Object.keys(stock)
-        .filter(d => d in xyz && d in spx && isTradingDay(d)).sort();
+    function spreadScreenConfig(pairKey) {
+      if (pairKey !== "XYZ100" && pairKey !== "SOXL") return null;
+      const pair = PAIRS[pairKey];
+      const targetLeg = pair.lev > 1 ? `${pair.target}/${pair.lev}` : pair.target;
+      const benchLeg = pair.benchLev > 1 ? `${pair.bench}/${pair.benchLev}` : pair.bench;
+      return {
+        target: pair.target, bench: pair.bench, targetLev: pair.lev || 1,
+        benchLev: pair.benchLev || 1, spreadBeta: pair.beta,
+        label: `${targetLeg} − ${trimNum(pair.beta)}×${benchLeg}`
+      };
+    }
+
+    function fitSpreadRegression(instrument, target, bench, targetLev, spreadBeta, benchLev) {
+      const dates = Object.keys(instrument)
+        .filter(d => d in target && d in bench && isTradingDay(d)).sort();
       const xs = [], ys = [];
-      const spreadBeta = PAIRS.XYZ100.beta;
+      targetLev = targetLev || 1;
+      benchLev = benchLev || 1;
       for (let i = 1; i < dates.length; i++) {
         const d0 = dates[i - 1], d1 = dates[i];
-        const stockRet = stock[d1] / stock[d0] - 1;
-        const spreadRet = (xyz[d1] / xyz[d0] - 1)
-          - spreadBeta * (spx[d1] / spx[d0] - 1);
-        if (isFinite(stockRet) && isFinite(spreadRet)) {
-          xs.push(stockRet); ys.push(spreadRet);
+        if (nextTradingDay(d0) !== d1) continue;
+        const instrumentRet = instrument[d1] / instrument[d0] - 1;
+        const spreadRet = (target[d1] / target[d0] - 1) / targetLev
+          - spreadBeta * (bench[d1] / bench[d0] - 1) / benchLev;
+        if (isFinite(instrumentRet) && isFinite(spreadRet)) {
+          xs.push(instrumentRet); ys.push(spreadRet);
         }
       }
       if (xs.length < 3) return null;
-      const mx = xs.reduce((s, v) => s + v, 0) / xs.length;
-      const my = ys.reduce((s, v) => s + v, 0) / ys.length;
-      let sxx = 0, sxy = 0, tss = 0, rss = 0;
+      let sxx = 0, sxy = 0, tss0 = 0, rss = 0;
       for (let i = 0; i < xs.length; i++) {
-        const dx = xs[i] - mx, dy = ys[i] - my;
-        sxx += dx * dx; sxy += dx * dy; tss += dy * dy;
+        sxx += xs[i] * xs[i]; sxy += xs[i] * ys[i]; tss0 += ys[i] * ys[i];
       }
       if (!(sxx > 0)) return null;
-      const beta = sxy / sxx, alpha = my - beta * mx;
+      const beta = sxy / sxx;
       for (let i = 0; i < xs.length; i++) {
-        rss += (ys[i] - alpha - beta * xs[i]) ** 2;
+        rss += (ys[i] - beta * xs[i]) ** 2;
       }
       return {
-        alphaPct: alpha * 100, beta, r2: tss > 0 ? 1 - rss / tss : NaN, n: xs.length
+        beta, r2: tss0 > 0 ? 1 - rss / tss0 : NaN, n: xs.length
       };
     }
 
     function expectedSpread(reg, movePct) {
-      return reg && isFinite(movePct) ? reg.alphaPct + reg.beta * movePct : NaN;
+      return reg && isFinite(reg.beta) && isFinite(movePct) ? reg.beta * movePct : NaN;
+    }
+
+    function solveLinearSystem(a, b) {
+      const n = b.length;
+      a = a.map((row, i) => [...row, b[i]]);
+      for (let col = 0; col < n; col++) {
+        let pivot = col;
+        for (let row = col + 1; row < n; row++) {
+          if (Math.abs(a[row][col]) > Math.abs(a[pivot][col])) pivot = row;
+        }
+        if (Math.abs(a[pivot][col]) < 1e-12) return null;
+        [a[col], a[pivot]] = [a[pivot], a[col]];
+        const div = a[col][col];
+        for (let j = col; j <= n; j++) a[col][j] /= div;
+        for (let row = 0; row < n; row++) {
+          if (row === col) continue;
+          const mult = a[row][col];
+          for (let j = col; j <= n; j++) a[row][j] -= mult * a[col][j];
+        }
+      }
+      return a.map(row => row[n]);
+    }
+
+    function fitRidge(X, y, lambda) {
+      if (!X.length || !X[0].length || X.length !== y.length) return null;
+      const n = X.length, p = X[0].length;
+      const weights = Array.from({ length: n }, (_, i) =>
+        Math.pow(0.5, (n - 1 - i) / JOINT_HALF_LIFE));
+      const sumW = weights.reduce((s, v) => s + v, 0);
+      const scale = Array(p).fill(0);
+      for (let j = 0; j < p; j++) {
+        for (let i = 0; i < n; i++) scale[j] += weights[i] * X[i][j] * X[i][j];
+        scale[j] = Math.sqrt(scale[j] / sumW) || 1;
+      }
+      const a = Array.from({ length: p }, () => Array(p).fill(0));
+      const b = Array(p).fill(0);
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < p; j++) {
+          const zj = X[i][j] / scale[j];
+          b[j] += weights[i] * zj * y[i];
+          for (let k = 0; k < p; k++) {
+            a[j][k] += weights[i] * zj * (X[i][k] / scale[k]);
+          }
+        }
+      }
+      for (let j = 0; j < p; j++) a[j][j] += lambda * sumW;
+      const theta = solveLinearSystem(a, b);
+      return theta ? theta.map((v, j) => v / scale[j]) : null;
+    }
+
+    function dot(a, b) {
+      let out = 0;
+      for (let i = 0; i < a.length; i++) out += a[i] * b[i];
+      return out;
+    }
+
+    function fitValidatedRidge(X, y, holdoutStart) {
+      if (X.length < 20 || !X[0] || !X[0].length) return null;
+      const lambdas = [0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1, 3, 10];
+      holdoutStart = holdoutStart == null
+        ? Math.max(15, Math.floor(X.length * 0.8)) : holdoutStart;
+      if (holdoutStart < 15 || holdoutStart >= X.length) return null;
+      const minTrain = Math.max(10, Math.floor(holdoutStart * 0.5));
+      let best = null;
+      for (const lambda of lambdas) {
+        let rss = 0, count = 0;
+        for (let i = minTrain; i < holdoutStart; i++) {
+          const beta = fitRidge(X.slice(0, i), y.slice(0, i), lambda);
+          if (!beta) continue;
+          const err = y[i] - dot(beta, X[i]);
+          rss += err * err; count++;
+        }
+        if (count && (!best || rss < best.rss)) best = { lambda, rss };
+      }
+      if (!best) return null;
+      let holdoutRss = 0, holdoutTss0 = 0, holdoutN = 0;
+      for (let i = holdoutStart; i < X.length; i++) {
+        const beta = fitRidge(X.slice(0, i), y.slice(0, i), best.lambda);
+        if (!beta) continue;
+        const err = y[i] - dot(beta, X[i]);
+        holdoutRss += err * err;
+        holdoutTss0 += y[i] * y[i];
+        holdoutN++;
+      }
+      if (!holdoutN) return null;
+      const beta = fitRidge(X, y, best.lambda);
+      return beta ? {
+        beta, lambda: best.lambda,
+        oosR2: holdoutTss0 > 0 ? 1 - holdoutRss / holdoutTss0 : NaN,
+        oosN: holdoutN
+      } : null;
+    }
+
+    function scoreJointCandidate(key, periods, anchors) {
+      const a = anchors[key];
+      if (!a) return null;
+      let sxx = 0, sxy = 0, tss0 = 0, rss = 0, n = 0;
+      const pairs = [];
+      for (const p of periods) {
+        if (!(p.d0 in a) || !(p.d1 in a)) continue;
+        const x = a[p.d1] / a[p.d0] - 1;
+        if (!isFinite(x)) continue;
+        pairs.push([x, p.y]);
+        sxx += x * x; sxy += x * p.y; tss0 += p.y * p.y; n++;
+      }
+      if (n < SPREAD_SCREEN_MIN_N || !(sxx > 0)) return null;
+      const beta = sxy / sxx;
+      for (const [x, y] of pairs) rss += (y - beta * x) ** 2;
+      return { r2: tss0 > 0 ? 1 - rss / tss0 : NaN, n };
+    }
+
+    function buildJointSpreadModel(config, anchors) {
+      const target = anchors[config.target], bench = anchors[config.bench];
+      if (!target || !bench) return null;
+      const dates = Object.keys(target)
+        .filter(d => d in bench && isTradingDay(d)).sort();
+      const periods = [];
+      for (let i = 1; i < dates.length; i++) {
+        const d0 = dates[i - 1], d1 = dates[i];
+        if (nextTradingDay(d0) !== d1) continue;
+        const y = (target[d1] / target[d0] - 1) / config.targetLev
+          - config.spreadBeta * (bench[d1] / bench[d0] - 1) / config.benchLev;
+        if (isFinite(y)) periods.push({ d0, d1, y });
+      }
+      if (periods.length < SPREAD_SCREEN_MIN_N) return null;
+      const selectionEnd = Math.max(15, Math.floor(periods.length * 0.8));
+      if (selectionEnd >= periods.length) return null;
+      const selectionPeriods = periods.slice(0, selectionEnd);
+      const selectionDates = new Set(selectionPeriods.map(p => p.d1));
+      let keys = Object.keys(anchors)
+        .filter(key => key !== config.target && key !== config.bench && key !== "SKHY")
+        .map(key => [key, scoreJointCandidate(key, selectionPeriods, anchors)])
+        .filter(([, reg]) => reg && isFinite(reg.r2) && reg.r2 >= SPREAD_SCREEN_MIN_R2)
+        .filter(([key]) => {
+          const a = anchors[key];
+          const covered = selectionPeriods.filter(p => p.d0 in a && p.d1 in a).length;
+          return covered / selectionPeriods.length >= JOINT_MIN_COVERAGE;
+        })
+        .sort((a, b) => b[1].r2 - a[1].r2)
+        .map(([key]) => key);
+      if (!keys.length) return null;
+      let selectionComplete = selectionPeriods.filter(p =>
+        keys.every(key => p.d0 in anchors[key] && p.d1 in anchors[key]));
+      while (keys.length > 1 && selectionComplete.length < 20) {
+        keys.pop();
+        selectionComplete = selectionPeriods.filter(p =>
+          keys.every(key => p.d0 in anchors[key] && p.d1 in anchors[key]));
+      }
+      if (selectionComplete.length < 15) return null;
+      const complete = periods.filter(p =>
+        keys.every(key => p.d0 in anchors[key] && p.d1 in anchors[key]));
+      if (complete.length < 20) return null;
+      const X = complete.map(p => keys.map(key => {
+        const a = anchors[key];
+        return a[p.d1] / a[p.d0] - 1;
+      }));
+      const y = complete.map(p => p.y);
+      const holdoutStart = complete.findIndex(p => !selectionDates.has(p.d1));
+      const fit = fitValidatedRidge(X, y, holdoutStart);
+      if (!fit) return null;
+      const betaByKey = {};
+      keys.forEach((key, i) => { betaByKey[key] = fit.beta[i]; });
+      return {
+        keys, betaByKey, lambda: fit.lambda, oosR2: fit.oosR2,
+        oosN: fit.oosN, n: complete.length
+      };
+    }
+
+    function rankedSpreadRegressions(pairKey) {
+      return Object.entries(spreadRegressions[pairKey] || {})
+        .filter(([key, reg]) => key !== "SKHY" && reg && reg.n >= SPREAD_SCREEN_MIN_N
+          && isFinite(reg.r2) && reg.r2 >= SPREAD_SCREEN_MIN_R2)
+        .sort((a, b) => b[1].r2 - a[1].r2 || b[1].n - a[1].n || a[0].localeCompare(b[0]));
+    }
+
+    function spreadTableRegressions(pairKey) {
+      const rows = rankedSpreadRegressions(pairKey);
+      const seen = new Set(rows.map(([key]) => key));
+      const joint = spreadJointModels[pairKey];
+      if (joint) {
+        for (const key of joint.keys) {
+          const reg = spreadRegressions[pairKey] && spreadRegressions[pairKey][key];
+          if (!seen.has(key) && reg) rows.push([key, reg]);
+        }
+      }
+      return rows.sort((a, b) =>
+        b[1].r2 - a[1].r2 || b[1].n - a[1].n || a[0].localeCompare(b[0]));
     }
 
     function updateSpreadImplications(pairKey) {
-      const pair = PAIRS[pairKey], regressions = spreadRegressions[pairKey] || {};
-      if (!pair) return;
-      for (const key of pair.heavies) {
-        const upper = key.toUpperCase(), reg = regressions[upper], item = marketMap[upper];
-        const liveMove = item ? item.rawPct : NaN;
+      if (!spreadScreenConfig(pairKey)) return;
+      const joint = spreadJointModels[pairKey];
+      let total = 0, freshCount = 0;
+      for (const [upper, reg] of spreadTableRegressions(pairKey)) {
+        const item = marketMap[upper];
+        const fresh = item && isFinite(item.rawPct) && ageOf(item) <= STALE_BAD_MS;
+        const liveMove = fresh ? item.rawPct : NaN;
         const expected = expectedSpread(reg, liveMove);
+        const jointBeta = joint && joint.betaByKey[upper];
+        const contribution = Number.isFinite(jointBeta) && isFinite(liveMove)
+          ? jointBeta * liveMove : NaN;
         const moveEl = document.getElementById(`dt-spread-live-${upper}`);
         const spreadEl = document.getElementById(`dt-spread-value-${upper}`);
+        const jointEl = document.getElementById(`dt-spread-joint-${upper}`);
+        const contributionEl = document.getElementById(`dt-spread-contribution-${upper}`);
         if (moveEl) moveEl.innerText = isFinite(liveMove) ? `${liveMove >= 0 ? "+" : ""}${liveMove.toFixed(2)}%` : "–";
         if (spreadEl) {
           spreadEl.innerText = isFinite(expected) ? `${expected >= 0 ? "+" : ""}${expected.toFixed(2)}%` : "–";
           spreadEl.style.color = isFinite(expected)
             ? (expected >= 0 ? "var(--up)" : "var(--down)") : "var(--text-dim)";
         }
+        if (jointEl) jointEl.innerText = Number.isFinite(jointBeta) ? jointBeta.toFixed(2) : "–";
+        if (contributionEl) {
+          contributionEl.innerText = isFinite(contribution)
+            ? `${contribution >= 0 ? "+" : ""}${contribution.toFixed(2)}%` : "–";
+          contributionEl.style.color = isFinite(contribution)
+            ? (contribution >= 0 ? "var(--up)" : "var(--down)") : "var(--text-dim)";
+        }
+      }
+      if (joint) {
+        for (const key of joint.keys) {
+          const item = marketMap[key], jointBeta = joint.betaByKey[key];
+          if (!item || !Number.isFinite(jointBeta)
+              || !isFinite(item.rawPct) || ageOf(item) > STALE_BAD_MS) continue;
+          total += jointBeta * item.rawPct;
+          freshCount++;
+        }
+      }
+      const overall = document.getElementById("dt-spread-overall");
+      const meta = document.getElementById("dt-spread-joint-meta");
+      if (overall) {
+        overall.innerText = joint && freshCount
+          ? `${total >= 0 ? "+" : ""}${total.toFixed(2)}%` : "–";
+        overall.className = `basis-spread ${!joint || !freshCount ? "neutral" : (total >= 0 ? "up" : "down")}`;
+      }
+      if (meta) {
+        meta.innerText = joint
+          ? `${freshCount}/${joint.keys.length} predictors fresh · rolling OOS R²₀ ${isFinite(joint.oosR2) ? joint.oosR2.toFixed(2) : "–"} (${joint.oosN} forecasts) · λ ${joint.lambda} · ${joint.n} training periods`
+          : "Not enough overlapping history for a validated joint estimate.";
       }
     }
 
     function renderSpreadImplications(pairKey) {
-      const pair = PAIRS[pairKey], regressions = spreadRegressions[pairKey] || {};
+      const config = spreadScreenConfig(pairKey);
+      const section = document.getElementById("dt-spread-section");
+      if (section) section.style.display = config ? "block" : "none";
+      if (!config) return;
       const table = document.getElementById("dt-spread-table");
-      if (!pair || !table) return;
-      table.innerHTML = `<table class="dt"><tr><th>STOCK</th><th>LIVE MOVE</th>`
-        + `<th>βspread</th><th>α</th><th>EXPECTED SPREAD</th><th>R² / N</th></tr>`
-        + pair.heavies.map(key => {
-          const upper = key.toUpperCase(), reg = regressions[upper];
+      if (!table) return;
+      document.getElementById("dt-spread-title").innerText =
+        `${config.target} − ${config.bench} Spread Implication`;
+      document.getElementById("dt-spread-description").innerText =
+        `Every tracked instrument is tested against the 4 PM ET close-to-close ${config.label} spread, through the origin (α fixed at 0). Rows with R²₀ ≥ ${SPREAD_SCREEN_MIN_R2.toFixed(2)} and at least ${SPREAD_SCREEN_MIN_N} observations are shown, together with predictors frozen before the joint model's holdout; all are ranked by R²₀.`;
+      const ranked = spreadTableRegressions(pairKey);
+      if (!spreadScreenReady) {
+        document.getElementById("dt-spread-overall").innerText = "–";
+        document.getElementById("dt-spread-joint-meta").innerText = "Building time-series validation…";
+        table.innerHTML = `<div class="chart-note">Testing all tracked instruments…</div>`;
+        return;
+      }
+      if (!ranked.length) {
+        table.innerHTML = `<div class="chart-note">No instrument currently clears R²₀ ≥ ${SPREAD_SCREEN_MIN_R2.toFixed(2)} with at least ${SPREAD_SCREEN_MIN_N} observations.</div>`;
+        return;
+      }
+      table.innerHTML = `<table class="dt"><tr><th>INSTRUMENT</th><th>LIVE MOVE</th>`
+        + `<th>βspread</th><th>EXPECTED</th><th>R²₀ / N</th>`
+        + `<th>JOINT β</th><th>CONTRIBUTION</th></tr>`
+        + ranked.map(([upper, reg]) => {
+          const jointBeta = spreadJointModels[pairKey]
+            && spreadJointModels[pairKey].betaByKey[upper];
           return `<tr><td>${upper}</td>`
             + `<td id="dt-spread-live-${upper}">–</td>`
-            + `<td>${reg && isFinite(reg.beta) ? reg.beta.toFixed(2) : "–"}</td>`
-            + `<td>${reg && isFinite(reg.alphaPct) ? `${reg.alphaPct >= 0 ? "+" : ""}${reg.alphaPct.toFixed(2)}%` : "–"}</td>`
+            + `<td>${isFinite(reg.beta) ? reg.beta.toFixed(2) : "–"}</td>`
             + `<td id="dt-spread-value-${upper}">–</td>`
-            + `<td>${reg && isFinite(reg.r2) ? `${reg.r2.toFixed(2)} / ${reg.n}` : "–"}</td></tr>`;
+            + `<td>${isFinite(reg.r2) ? `${reg.r2.toFixed(2)} / ${reg.n}` : "–"}</td>`
+            + `<td id="dt-spread-joint-${upper}">${Number.isFinite(jointBeta) ? jointBeta.toFixed(2) : "–"}</td>`
+            + `<td id="dt-spread-contribution-${upper}">–</td></tr>`;
         }).join("") + `</table>`;
       const formula = document.getElementById("dt-spread-formula");
-      if (formula) formula.innerText = `expected spread = α + βspread × current 4 PM move · spread = XYZ100 − ${trimNum(PAIRS.XYZ100.beta)}×SP500`;
+      if (formula) formula.innerText = `expected spread = βspread × current 4 PM move (α fixed at 0) · spread = ${config.label}`;
       updateSpreadImplications(pairKey);
     }
 
     let peerCorrelations = {}, peerCorrelationLoading = {};
+    let spreadScreenInFlight = false;
+
+    async function allSettledLimited(items, limit, worker) {
+      const results = new Array(items.length);
+      let next = 0;
+      async function run() {
+        while (next < items.length) {
+          const i = next++;
+          try {
+            results[i] = { status: "fulfilled", value: await worker(items[i]) };
+          } catch (reason) {
+            results[i] = { status: "rejected", reason };
+          }
+        }
+      }
+      await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
+      return results;
+    }
 
     function anchorStats(a, b) {
       const dates = Object.keys(a).filter(d => d in b && isTradingDay(d)).sort();
@@ -774,19 +1054,25 @@
     }
 
     async function loadPeerCorrelations(pairKey) {
-      if (peerCorrelationLoading[pairKey] || peerCorrelations[pairKey]) return;
+      if (peerCorrelationLoading[pairKey]
+          || (peerCorrelations[pairKey]
+              && (!spreadScreenConfig(pairKey) || spreadScreenReady))) return;
       const pair = PAIRS[pairKey];
+      const screening = !!spreadScreenConfig(pairKey)
+        && !spreadScreenReady && !spreadScreenInFlight;
       const names = [...new Set([
-        pair.target, "XYZ100", "SP500", ...pair.heavies.map(k => k.toUpperCase())
+        pair.target, "XYZ100", "SP500", ...pair.heavies.map(k => k.toUpperCase()),
+        ...(screening ? [...activeKeys] : [])
       ])];
       const fetchable = names.filter(k => marketMap[k]);
       if (!fetchable.length) return;
       peerCorrelationLoading[pairKey] = true;
+      if (screening) spreadScreenInFlight = true;
       try {
-        const settled = await Promise.allSettled(fetchable.map(async key => {
+        const settled = await allSettledLimited(fetchable, HISTORY_FETCH_CONCURRENCY, async key => {
           const hist = await fetchCandles(marketMap[key].fullName, HISTORY_DAYS);
           return [key, indexCandles(hist).anchors];
-        }));
+        });
         const anchors = {};
         for (const result of settled) {
           if (result.status === "fulfilled") {
@@ -806,21 +1092,39 @@
           }
         }
         peerCorrelations[pairKey] = result;
-        const spreadResult = {};
-        if (anchors.XYZ100 && anchors.SP500) {
-          for (const key of pair.heavies) {
-            const stockAnchors = anchors[key.toUpperCase()];
-            if (stockAnchors) spreadResult[key.toUpperCase()] =
-              fitSpreadRegression(stockAnchors, anchors.XYZ100, anchors.SP500);
+        if (screening) {
+          const screens = {};
+          const jointModels = {};
+          for (const screenKey of ["XYZ100", "SOXL"]) {
+            const config = spreadScreenConfig(screenKey);
+            const targetAnchors = anchors[config.target];
+            const benchAnchors = anchors[config.bench];
+            const spreadResult = {};
+            if (targetAnchors && benchAnchors) {
+              for (const key of Object.keys(anchors)) {
+                if (key === config.target || key === config.bench) continue;
+                const reg = fitSpreadRegression(
+                  anchors[key], targetAnchors, benchAnchors,
+                  config.targetLev, config.spreadBeta, config.benchLev
+                );
+                if (reg) spreadResult[key] = reg;
+              }
+            }
+            screens[screenKey] = spreadResult;
+            jointModels[screenKey] =
+              buildJointSpreadModel(config, anchors);
           }
+          spreadRegressions = screens;
+          spreadJointModels = jointModels;
+          spreadScreenReady = true;
         }
-        spreadRegressions[pairKey] = spreadResult;
         if (currentView === "detail" && activePairKey === pairKey) {
           renderHeavyweights(pairKey);
-          renderSpreadImplications(pairKey);
         }
+        if (currentView === "detail") renderSpreadImplications(activePairKey);
       } finally {
         peerCorrelationLoading[pairKey] = false;
+        if (screening) spreadScreenInFlight = false;
       }
     }
 
