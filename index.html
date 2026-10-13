@@ -227,10 +227,6 @@
         <div class="basis-meta" id="dt-spread-formula" style="margin-top: 8px;">
           Expected spread = βspread × current instrument move
         </div>
-        <div class="basis-divider"></div>
-        <div class="basis-label">Joint ridge estimate</div>
-        <div class="basis-spread neutral" id="dt-spread-overall">–</div>
-        <div class="basis-sub" id="dt-spread-joint-meta">Building time-series validation…</div>
         <div id="dt-spread-table" style="overflow-x: auto; margin-top: 8px;"></div>
       </div>
     </div>
@@ -308,11 +304,10 @@
     const CANDLE_MS = 15 * 60 * 1000;
     const HISTORY_DAYS = 140;                // ~90 NYSE trading days after weekends/holidays
     const CANDLE_CHUNK_DAYS = 45;            // stays below Hyperliquid's ~5,000-candle cap
+    const BETA_CALIBRATION_CACHE_KEY = "hl_daily_beta_calibration_v1";
     const SPREAD_SCREEN_MIN_N = 15;
     const SPREAD_SCREEN_MIN_R2 = 0.05;
     const HISTORY_FETCH_CONCURRENCY = 6;
-    const JOINT_MIN_COVERAGE = 0.80;
-    const JOINT_HALF_LIFE = 40;
     const CACHE_PREFIX = "hl_close_v2_";   // v2: v1 caches hold the wrong (16:15) baseline
     const STALE_WARN_MS = 60 * 1000;
     const STALE_BAD_MS = 5 * 60 * 1000;
@@ -327,9 +322,9 @@
     //
     // targetLev is the target's structural leverage (SOXL resets to 3x at every NAV strike), so
     // the divide is a de-levering, not a scaling choice. benchLev optionally de-levers the
-    // benchmark first (for example, DRAM uses SOXL/3). beta is the model multiplier and is held
-    // FIXED live - the fitted beta is reported in Diagnostics only, never fed back. A beta
-    // that moved yesterday would make today's z-score incomparable to yesterday's.
+    // benchmark first (for example, DRAM uses SOXL/3). beta is the prior model multiplier; after
+    // enough 4 PM history, a holdout-selected calibrated beta is held fixed for the session.
+    // This keeps today's z-score stable while allowing each model to improve as its archive grows.
     //
     // threshold is an economic hurdle in unlevered %, not a statistical one: it is ~9-13x the
     // cost of establishing the hedge at current spreads.
@@ -381,6 +376,11 @@
       MRVL: [2.3, 4.114],   // 2.71 ± 0.69 (.32)
       WDC:  [1.8, 4.149],   // 1.56 ± 0.69 (.13)  XYZ100 explains only an eighth of WDC
       ARM:  [2.6, 3.033],   // 3.33 ± 0.56 (.52)
+      // Hyperliquid xyz:SNDK (USDC collateral). Its short available sample is noisy
+      // (raw beta ~1.5, R² ~0.10 over 34 daily anchors), so start at the 2.0 semis prior.
+      // The daily holdout-selected calibration can move the live beta as its archive grows;
+      // residual sigma at the prior is ~3.92%, so the provisional 0.5σ hurdle is ~1.95%.
+      SNDK: [2.0, 3.920],
       // Non-US listings, held to the SAME 16:00 ET anchor as everything else. That grid still
       // contains exactly one Korean cash session per period (19:00-01:30 ET), it just sits near
       // the START of the period rather than the end - so by the US open their cash session is
@@ -397,7 +397,7 @@
     // those are live traded numbers and are not mine to change silently.
     const THR_SIGMA = 0.5;
     const SEMIS_PEERS = ["NVDA", "AMD", "MU", "DRAM", "INTC", "TSM", "AVGO", "MRVL", "WDC", "ARM",
-                         "SMSN", "SKHX", "SKHY", "SOXL"];
+                          "SMSN", "SKHX", "SKHY", "SNDK", "SOXL"];
 
     for (const [tkr, [b, sd]] of Object.entries(SEMIS_FIT)) {
       PAIRS[tkr] = {
@@ -420,10 +420,65 @@
       betaStory: "DRAM vs unlevered SOXL (SOXL/3), with the live beta held at 1.5"
     };
 
+    // Provisional fixed models for every remaining dashboard instrument. These are deliberately
+    // coarse priors, not fitted coefficients masquerading as precision. The model-error view
+    // reports each instrument's fitted beta, R² and beta test against this live multiplier so
+    // the priors can be revised after the 4 PM archive has accumulated a useful sample.
+    const MACRO_PEERS = ["SP500", "XYZ100", "NATGAS", "COPPER", "CL", "GOLD", "TLT"];
+    const MEGACAP_PEERS = ["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL", "META", "AVGO", "TSLA", "PLTR"];
+    const CRYPTO_PEERS = ["BTC", "MSTR", "COIN", "IREN", "HOOD"];
+    const GENERAL_MODELS = {
+      SP500: { bench: "XYZ100", beta: 0.77, threshold: 0.25,
+        macro: ["XYZ100", "SP500"], peers: MACRO_PEERS, peersTitle: "Macro Peers",
+        story: "broad US equities versus the NASDAQ 100; 0.77 is the reciprocal of the fixed 1.30 XYZ100/SP500 prior" },
+      NATGAS: { bench: "CL", beta: 0.30, threshold: 1.50,
+        macro: ["CL", "SP500"], peers: MACRO_PEERS, peersTitle: "Macro Peers",
+        story: "natural gas versus crude as a low-beta energy-complex prior" },
+      COPPER: { bench: "SP500", beta: 0.80, threshold: 0.75,
+        macro: ["SP500", "CL"], peers: MACRO_PEERS, peersTitle: "Macro Peers",
+        story: "cyclical copper versus broad US equities" },
+      CL: { bench: "SP500", beta: 0.60, threshold: 1.00,
+        macro: ["SP500", "COPPER"], peers: MACRO_PEERS, peersTitle: "Macro Peers",
+        story: "crude oil versus broad risk appetite" },
+      GOLD: { bench: "SP500", beta: -0.10, threshold: 0.50,
+        macro: ["SP500", "TLT"], peers: MACRO_PEERS, peersTitle: "Macro Peers",
+        story: "gold versus broad equities with a small defensive beta prior" },
+      TLT: { bench: "SP500", beta: -0.30, threshold: 0.50,
+        macro: ["SP500", "GOLD"], peers: MACRO_PEERS, peersTitle: "Macro Peers",
+        story: "long-duration Treasuries versus broad equities with a defensive beta prior" },
+      AAPL: { bench: "XYZ100", beta: 0.90, threshold: 0.75 },
+      GOOGL: { bench: "XYZ100", beta: 1.00, threshold: 0.80 },
+      META: { bench: "XYZ100", beta: 1.20, threshold: 1.00 },
+      AMZN: { bench: "XYZ100", beta: 1.10, threshold: 0.90 },
+      MSFT: { bench: "XYZ100", beta: 0.90, threshold: 0.65 },
+      TSLA: { bench: "XYZ100", beta: 1.70, threshold: 1.50 },
+      PLTR: { bench: "XYZ100", beta: 1.80, threshold: 1.50 },
+      MSTR: { bench: "BTC", beta: 1.80, threshold: 2.00 },
+      COIN: { bench: "BTC", beta: 1.40, threshold: 1.50 },
+      IREN: { bench: "BTC", beta: 1.50, threshold: 2.00 },
+      HOOD: { bench: "BTC", beta: 0.90, threshold: 1.25 }
+    };
+    for (const [tkr, model] of Object.entries(GENERAL_MODELS)) {
+      const crypto = model.bench === "BTC";
+      PAIRS[tkr] = {
+        target: tkr, bench: model.bench, lev: 1, beta: model.beta,
+        threshold: model.threshold, title: `${tkr} ANALYSIS`,
+        macro: model.macro || (crypto ? ["BTC", "XYZ100"] : ["XYZ100", "SP500"]),
+        heavies: model.peers || (crypto ? CRYPTO_PEERS : MEGACAP_PEERS),
+        heaviesTitle: model.peersTitle || (crypto ? "Crypto Peers" : "Mega-Cap / AI Peers"),
+        betaStory: model.story || `provisional fixed ${model.beta.toFixed(2)} beta to ${model.bench}; compare with fitted β in Diagnostics`
+      };
+    }
+
     // Human labels for the macro strip. Anything absent falls back to the bare ticker.
     const NICE_NAME = {
-      XYZ100: "NASDAQ 100 (XYZ100)", SP500: "S&P 500 (SP500)", SOXL: "SOXL 3x Semis"
+      XYZ100: "NASDAQ 100 (XYZ100)", SP500: "S&P 500 (SP500)", SOXL: "SOXL 3x Semis",
+      BTC: "Bitcoin (BTC)"
     };
+
+    function effectiveBeta(pair) {
+      return pair && Number.isFinite(pair.liveBeta) ? pair.liveBeta : pair.beta;
+    }
 
     let marketMap = {};
     let baseOwner = {};                    // base ticker -> entry that won the venue contest
@@ -451,7 +506,7 @@
       ]},
       { category: "THEMATICS", subgroups: [
         { name: "Semiconductors & Equipment", tickers: ["NVDA", "AMD", "TSM", "AVGO", "INTC", "MU", "DRAM",
-                                                        "MRVL", "WDC", "ARM", "SMSN", "SKHX", "SKHY", "SOXL"] },
+                                                         "MRVL", "WDC", "ARM", "SMSN", "SKHX", "SKHY", "SNDK", "SOXL"] },
         { name: "AI & Mega-Cap Tech", tickers: ["AAPL", "GOOGL", "META", "AMZN", "MSFT", "TSLA", "PLTR"] },
         { name: "Crypto & On-Chain", tickers: ["MSTR", "COIN", "IREN", "HOOD"] }
       ]}
@@ -635,7 +690,7 @@
       const corrTxt = isFinite(corr) ? ` · ρ ${corr.toFixed(2)}` : "";
       const betaTxt = isFinite(beta) ? ` · β→${target} ${beta.toFixed(2)}` : "";
       const modelTxt = pair
-        ? ` · model ${pair.bench}${pair.benchLev > 1 ? "/" + pair.benchLev : ""} × ${trimNum(pair.beta)}`
+        ? ` · model ${pair.bench}${pair.benchLev > 1 ? "/" + pair.benchLev : ""} × ${trimNum(effectiveBeta(pair))}`
         : "";
       const tag = pair ? "div" : "a";
       const attrs = pair
@@ -659,7 +714,6 @@
     }
 
     let spreadRegressions = {};
-    let spreadJointModels = {};
     let spreadScreenReady = false;
 
     function spreadScreenConfig(pairKey) {
@@ -709,172 +763,6 @@
       return reg && isFinite(reg.beta) && isFinite(movePct) ? reg.beta * movePct : NaN;
     }
 
-    function solveLinearSystem(a, b) {
-      const n = b.length;
-      a = a.map((row, i) => [...row, b[i]]);
-      for (let col = 0; col < n; col++) {
-        let pivot = col;
-        for (let row = col + 1; row < n; row++) {
-          if (Math.abs(a[row][col]) > Math.abs(a[pivot][col])) pivot = row;
-        }
-        if (Math.abs(a[pivot][col]) < 1e-12) return null;
-        [a[col], a[pivot]] = [a[pivot], a[col]];
-        const div = a[col][col];
-        for (let j = col; j <= n; j++) a[col][j] /= div;
-        for (let row = 0; row < n; row++) {
-          if (row === col) continue;
-          const mult = a[row][col];
-          for (let j = col; j <= n; j++) a[row][j] -= mult * a[col][j];
-        }
-      }
-      return a.map(row => row[n]);
-    }
-
-    function fitRidge(X, y, lambda) {
-      if (!X.length || !X[0].length || X.length !== y.length) return null;
-      const n = X.length, p = X[0].length;
-      const weights = Array.from({ length: n }, (_, i) =>
-        Math.pow(0.5, (n - 1 - i) / JOINT_HALF_LIFE));
-      const sumW = weights.reduce((s, v) => s + v, 0);
-      const scale = Array(p).fill(0);
-      for (let j = 0; j < p; j++) {
-        for (let i = 0; i < n; i++) scale[j] += weights[i] * X[i][j] * X[i][j];
-        scale[j] = Math.sqrt(scale[j] / sumW) || 1;
-      }
-      const a = Array.from({ length: p }, () => Array(p).fill(0));
-      const b = Array(p).fill(0);
-      for (let i = 0; i < n; i++) {
-        for (let j = 0; j < p; j++) {
-          const zj = X[i][j] / scale[j];
-          b[j] += weights[i] * zj * y[i];
-          for (let k = 0; k < p; k++) {
-            a[j][k] += weights[i] * zj * (X[i][k] / scale[k]);
-          }
-        }
-      }
-      for (let j = 0; j < p; j++) a[j][j] += lambda * sumW;
-      const theta = solveLinearSystem(a, b);
-      return theta ? theta.map((v, j) => v / scale[j]) : null;
-    }
-
-    function dot(a, b) {
-      let out = 0;
-      for (let i = 0; i < a.length; i++) out += a[i] * b[i];
-      return out;
-    }
-
-    function fitValidatedRidge(X, y, holdoutStart) {
-      if (X.length < 20 || !X[0] || !X[0].length) return null;
-      const lambdas = [0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1, 3, 10];
-      holdoutStart = holdoutStart == null
-        ? Math.max(15, Math.floor(X.length * 0.8)) : holdoutStart;
-      if (holdoutStart < 15 || holdoutStart >= X.length) return null;
-      const minTrain = Math.max(10, Math.floor(holdoutStart * 0.5));
-      let best = null;
-      for (const lambda of lambdas) {
-        let rss = 0, count = 0;
-        for (let i = minTrain; i < holdoutStart; i++) {
-          const beta = fitRidge(X.slice(0, i), y.slice(0, i), lambda);
-          if (!beta) continue;
-          const err = y[i] - dot(beta, X[i]);
-          rss += err * err; count++;
-        }
-        if (count && (!best || rss < best.rss)) best = { lambda, rss };
-      }
-      if (!best) return null;
-      let holdoutRss = 0, holdoutTss0 = 0, holdoutN = 0;
-      for (let i = holdoutStart; i < X.length; i++) {
-        const beta = fitRidge(X.slice(0, i), y.slice(0, i), best.lambda);
-        if (!beta) continue;
-        const err = y[i] - dot(beta, X[i]);
-        holdoutRss += err * err;
-        holdoutTss0 += y[i] * y[i];
-        holdoutN++;
-      }
-      if (!holdoutN) return null;
-      const beta = fitRidge(X, y, best.lambda);
-      return beta ? {
-        beta, lambda: best.lambda,
-        oosR2: holdoutTss0 > 0 ? 1 - holdoutRss / holdoutTss0 : NaN,
-        oosN: holdoutN
-      } : null;
-    }
-
-    function scoreJointCandidate(key, periods, anchors) {
-      const a = anchors[key];
-      if (!a) return null;
-      let sxx = 0, sxy = 0, tss0 = 0, rss = 0, n = 0;
-      const pairs = [];
-      for (const p of periods) {
-        if (!(p.d0 in a) || !(p.d1 in a)) continue;
-        const x = a[p.d1] / a[p.d0] - 1;
-        if (!isFinite(x)) continue;
-        pairs.push([x, p.y]);
-        sxx += x * x; sxy += x * p.y; tss0 += p.y * p.y; n++;
-      }
-      if (n < SPREAD_SCREEN_MIN_N || !(sxx > 0)) return null;
-      const beta = sxy / sxx;
-      for (const [x, y] of pairs) rss += (y - beta * x) ** 2;
-      return { r2: tss0 > 0 ? 1 - rss / tss0 : NaN, n };
-    }
-
-    function buildJointSpreadModel(config, anchors) {
-      const target = anchors[config.target], bench = anchors[config.bench];
-      if (!target || !bench) return null;
-      const dates = Object.keys(target)
-        .filter(d => d in bench && isTradingDay(d)).sort();
-      const periods = [];
-      for (let i = 1; i < dates.length; i++) {
-        const d0 = dates[i - 1], d1 = dates[i];
-        if (nextTradingDay(d0) !== d1) continue;
-        const y = (target[d1] / target[d0] - 1) / config.targetLev
-          - config.spreadBeta * (bench[d1] / bench[d0] - 1) / config.benchLev;
-        if (isFinite(y)) periods.push({ d0, d1, y });
-      }
-      if (periods.length < SPREAD_SCREEN_MIN_N) return null;
-      const selectionEnd = Math.max(15, Math.floor(periods.length * 0.8));
-      if (selectionEnd >= periods.length) return null;
-      const selectionPeriods = periods.slice(0, selectionEnd);
-      const selectionDates = new Set(selectionPeriods.map(p => p.d1));
-      let keys = Object.keys(anchors)
-        .filter(key => key !== config.target && key !== config.bench && key !== "SKHY")
-        .map(key => [key, scoreJointCandidate(key, selectionPeriods, anchors)])
-        .filter(([, reg]) => reg && isFinite(reg.r2) && reg.r2 >= SPREAD_SCREEN_MIN_R2)
-        .filter(([key]) => {
-          const a = anchors[key];
-          const covered = selectionPeriods.filter(p => p.d0 in a && p.d1 in a).length;
-          return covered / selectionPeriods.length >= JOINT_MIN_COVERAGE;
-        })
-        .sort((a, b) => b[1].r2 - a[1].r2)
-        .map(([key]) => key);
-      if (!keys.length) return null;
-      let selectionComplete = selectionPeriods.filter(p =>
-        keys.every(key => p.d0 in anchors[key] && p.d1 in anchors[key]));
-      while (keys.length > 1 && selectionComplete.length < 20) {
-        keys.pop();
-        selectionComplete = selectionPeriods.filter(p =>
-          keys.every(key => p.d0 in anchors[key] && p.d1 in anchors[key]));
-      }
-      if (selectionComplete.length < 15) return null;
-      const complete = periods.filter(p =>
-        keys.every(key => p.d0 in anchors[key] && p.d1 in anchors[key]));
-      if (complete.length < 20) return null;
-      const X = complete.map(p => keys.map(key => {
-        const a = anchors[key];
-        return a[p.d1] / a[p.d0] - 1;
-      }));
-      const y = complete.map(p => p.y);
-      const holdoutStart = complete.findIndex(p => !selectionDates.has(p.d1));
-      const fit = fitValidatedRidge(X, y, holdoutStart);
-      if (!fit) return null;
-      const betaByKey = {};
-      keys.forEach((key, i) => { betaByKey[key] = fit.beta[i]; });
-      return {
-        keys, betaByKey, lambda: fit.lambda, oosR2: fit.oosR2,
-        oosN: fit.oosN, n: complete.length
-      };
-    }
-
     function rankedSpreadRegressions(pairKey) {
       return Object.entries(spreadRegressions[pairKey] || {})
         .filter(([key, reg]) => key !== "SKHY" && reg && reg.n >= SPREAD_SCREEN_MIN_N
@@ -883,69 +771,24 @@
     }
 
     function spreadTableRegressions(pairKey) {
-      const rows = rankedSpreadRegressions(pairKey);
-      const seen = new Set(rows.map(([key]) => key));
-      const joint = spreadJointModels[pairKey];
-      if (joint) {
-        for (const key of joint.keys) {
-          const reg = spreadRegressions[pairKey] && spreadRegressions[pairKey][key];
-          if (!seen.has(key) && reg) rows.push([key, reg]);
-        }
-      }
-      return rows.sort((a, b) =>
-        b[1].r2 - a[1].r2 || b[1].n - a[1].n || a[0].localeCompare(b[0]));
+      return rankedSpreadRegressions(pairKey);
     }
 
     function updateSpreadImplications(pairKey) {
       if (!spreadScreenConfig(pairKey)) return;
-      const joint = spreadJointModels[pairKey];
-      let total = 0, freshCount = 0;
       for (const [upper, reg] of spreadTableRegressions(pairKey)) {
         const item = marketMap[upper];
         const fresh = item && isFinite(item.rawPct) && ageOf(item) <= STALE_BAD_MS;
         const liveMove = fresh ? item.rawPct : NaN;
         const expected = expectedSpread(reg, liveMove);
-        const jointBeta = joint && joint.betaByKey[upper];
-        const contribution = Number.isFinite(jointBeta) && isFinite(liveMove)
-          ? jointBeta * liveMove : NaN;
         const moveEl = document.getElementById(`dt-spread-live-${upper}`);
         const spreadEl = document.getElementById(`dt-spread-value-${upper}`);
-        const jointEl = document.getElementById(`dt-spread-joint-${upper}`);
-        const contributionEl = document.getElementById(`dt-spread-contribution-${upper}`);
         if (moveEl) moveEl.innerText = isFinite(liveMove) ? `${liveMove >= 0 ? "+" : ""}${liveMove.toFixed(2)}%` : "–";
         if (spreadEl) {
           spreadEl.innerText = isFinite(expected) ? `${expected >= 0 ? "+" : ""}${expected.toFixed(2)}%` : "–";
           spreadEl.style.color = isFinite(expected)
             ? (expected >= 0 ? "var(--up)" : "var(--down)") : "var(--text-dim)";
         }
-        if (jointEl) jointEl.innerText = Number.isFinite(jointBeta) ? jointBeta.toFixed(2) : "–";
-        if (contributionEl) {
-          contributionEl.innerText = isFinite(contribution)
-            ? `${contribution >= 0 ? "+" : ""}${contribution.toFixed(2)}%` : "–";
-          contributionEl.style.color = isFinite(contribution)
-            ? (contribution >= 0 ? "var(--up)" : "var(--down)") : "var(--text-dim)";
-        }
-      }
-      if (joint) {
-        for (const key of joint.keys) {
-          const item = marketMap[key], jointBeta = joint.betaByKey[key];
-          if (!item || !Number.isFinite(jointBeta)
-              || !isFinite(item.rawPct) || ageOf(item) > STALE_BAD_MS) continue;
-          total += jointBeta * item.rawPct;
-          freshCount++;
-        }
-      }
-      const overall = document.getElementById("dt-spread-overall");
-      const meta = document.getElementById("dt-spread-joint-meta");
-      if (overall) {
-        overall.innerText = joint && freshCount
-          ? `${total >= 0 ? "+" : ""}${total.toFixed(2)}%` : "–";
-        overall.className = `basis-spread ${!joint || !freshCount ? "neutral" : (total >= 0 ? "up" : "down")}`;
-      }
-      if (meta) {
-        meta.innerText = joint
-          ? `${freshCount}/${joint.keys.length} predictors fresh · rolling OOS R²₀ ${isFinite(joint.oosR2) ? joint.oosR2.toFixed(2) : "–"} (${joint.oosN} forecasts) · λ ${joint.lambda} · ${joint.n} training periods`
-          : "Not enough overlapping history for a validated joint estimate.";
       }
     }
 
@@ -959,11 +802,9 @@
       document.getElementById("dt-spread-title").innerText =
         `${config.target} − ${config.bench} Spread Implication`;
       document.getElementById("dt-spread-description").innerText =
-        `Every tracked instrument is tested against the 4 PM ET close-to-close ${config.label} spread, through the origin (α fixed at 0). Rows with R²₀ ≥ ${SPREAD_SCREEN_MIN_R2.toFixed(2)} and at least ${SPREAD_SCREEN_MIN_N} observations are shown, together with predictors frozen before the joint model's holdout; all are ranked by R²₀.`;
+        `Every tracked instrument is tested against the 4 PM ET close-to-close ${config.label} spread, through the origin (α fixed at 0). Rows with R²₀ ≥ ${SPREAD_SCREEN_MIN_R2.toFixed(2)} and at least ${SPREAD_SCREEN_MIN_N} observations are shown, ranked by R²₀.`;
       const ranked = spreadTableRegressions(pairKey);
       if (!spreadScreenReady) {
-        document.getElementById("dt-spread-overall").innerText = "–";
-        document.getElementById("dt-spread-joint-meta").innerText = "Building time-series validation…";
         table.innerHTML = `<div class="chart-note">Testing all tracked instruments…</div>`;
         return;
       }
@@ -972,18 +813,13 @@
         return;
       }
       table.innerHTML = `<table class="dt"><tr><th>INSTRUMENT</th><th>LIVE MOVE</th>`
-        + `<th>βspread</th><th>EXPECTED</th><th>R²₀ / N</th>`
-        + `<th>JOINT β</th><th>CONTRIBUTION</th></tr>`
+        + `<th>βspread</th><th>EXPECTED</th><th>R²₀ / N</th></tr>`
         + ranked.map(([upper, reg]) => {
-          const jointBeta = spreadJointModels[pairKey]
-            && spreadJointModels[pairKey].betaByKey[upper];
           return `<tr><td>${upper}</td>`
             + `<td id="dt-spread-live-${upper}">–</td>`
             + `<td>${isFinite(reg.beta) ? reg.beta.toFixed(2) : "–"}</td>`
             + `<td id="dt-spread-value-${upper}">–</td>`
-            + `<td>${isFinite(reg.r2) ? `${reg.r2.toFixed(2)} / ${reg.n}` : "–"}</td>`
-            + `<td id="dt-spread-joint-${upper}">${Number.isFinite(jointBeta) ? jointBeta.toFixed(2) : "–"}</td>`
-            + `<td id="dt-spread-contribution-${upper}">–</td></tr>`;
+            + `<td>${isFinite(reg.r2) ? `${reg.r2.toFixed(2)} / ${reg.n}` : "–"}</td></tr>`;
         }).join("") + `</table>`;
       const formula = document.getElementById("dt-spread-formula");
       if (formula) formula.innerText = `expected spread = βspread × current 4 PM move (α fixed at 0) · spread = ${config.label}`;
@@ -1094,7 +930,6 @@
         peerCorrelations[pairKey] = result;
         if (screening) {
           const screens = {};
-          const jointModels = {};
           for (const screenKey of ["XYZ100", "SOXL"]) {
             const config = spreadScreenConfig(screenKey);
             const targetAnchors = anchors[config.target];
@@ -1111,11 +946,8 @@
               }
             }
             screens[screenKey] = spreadResult;
-            jointModels[screenKey] =
-              buildJointSpreadModel(config, anchors);
           }
           spreadRegressions = screens;
-          spreadJointModels = jointModels;
           spreadScreenReady = true;
         }
         if (currentView === "detail" && activePairKey === pairKey) {
@@ -1137,7 +969,7 @@
       activePairKey = pairKey;
 
       const tgt = marketMap[pair.target], bench = marketMap[pair.bench];
-      const bStr = trimNum(pair.beta);
+      const bStr = trimNum(effectiveBeta(pair));
 
       document.getElementById("dt-title").innerText = pair.title;
       pair.macro.forEach((k, i) => {
@@ -1215,7 +1047,7 @@
             retVal = item.rawPct / pair.lev;
             let bench = marketMap[pair.bench];
             if (bench) {
-                outperfVal = retVal - (bench.rawPct / (pair.benchLev || 1) * pair.beta);
+                outperfVal = retVal - (bench.rawPct / (pair.benchLev || 1) * effectiveBeta(pair));
               // A basis is only as fresh as its stalest leg. The detail view already gates on
               // both; without this the list would colour a confident basis off a dead hedge.
               benchDead = ageOf(bench) > STALE_BAD_MS;
@@ -1274,7 +1106,7 @@
         if (tgt && bench) {
            let tgtRet = tgt.rawPct / pair.lev;
             let benchLev = pair.benchLev || 1;
-            let modelRet = bench.rawPct / benchLev * pair.beta;
+            let modelRet = bench.rawPct / benchLev * effectiveBeta(pair);
            let basis = tgtRet - modelRet;
 
            // FIX 5: the basis is a small number built from two live mids and two
@@ -1290,9 +1122,10 @@
            //
             // The hedge ratio follows from the basis definition:
             //   b = r_T/targetLev − β·r_B/benchLev
-            // so the benchmark spread is paid on targetLev·β/benchLev of notional.
+            // so the benchmark spread is paid on targetLev·|β|/benchLev of notional.
+            // The beta sign determines hedge direction, not whether crossing the leg earns spread.
             let costBps = isFinite(sT) && isFinite(sB)
-              ? sT + pair.lev * pair.beta / benchLev * sB : NaN;
+              ? sT + pair.lev * Math.abs(effectiveBeta(pair)) / benchLev * sB : NaN;
            let hurdleBps = pair.threshold * pair.lev * 100;
 
            let reasons = [];
@@ -1333,7 +1166,7 @@
            let leg = (nm, g, f) => `${nm} ${isFinite(g) ? sgn(g, 1) + "bp" : "–"}`
                                  + `${isFinite(f) ? ` fnd ${sgn(f, 0)}%/yr` : ""}`;
             let maxContam = (isFinite(gT) && isFinite(gB))
-              ? (gT / pair.lev - pair.beta * gB / benchLev) / 100 : NaN;
+              ? (gT / pair.lev - effectiveBeta(pair) * gB / benchLev) / 100 : NaN;
            let contamShare = isFinite(maxContam) ? Math.abs(maxContam) / pair.threshold * 100 : NaN;
            let pEl = document.getElementById("dt-perp");
            // Signed, deliberately: the sign says which way the perp effect pushes the basis.
@@ -1897,7 +1730,7 @@
     function renderModelView() {
       const m = modelState();
       if (!m) return;
-      const pair = m.pair, bStr = trimNum(pair.beta);
+      const pair = m.pair, bStr = trimNum(m.beta);
       const nd = nextTradingDay(m.todayAnchor);
       const gapToday = nd ? dayGap(m.todayAnchor, nd) : 1;
       const weekend = gapToday > 1;
@@ -1923,7 +1756,7 @@
         `Daily ${pair.lev > 1 ? "unlevered " : ""}error, close → close`;
       document.getElementById("mv-lg-rich").innerText = `${pair.target} rich`;
       document.getElementById("mv-lg-cheap").innerText = `${pair.target} cheap`;
-      document.getElementById("mv-btest-k").innerText = `β vs ${pair.beta.toFixed(2)}`;
+      document.getElementById("mv-btest-k").innerText = `β vs ${m.beta.toFixed(2)}`;
       document.getElementById("mv-range").innerText = m.clean.length
         ? `${m.clean[0].from} → ${m.clean[m.clean.length - 1].to}` : "–";
       document.getElementById("mv-cone-n").innerText = cone.length ? String(coneAt(cone, 0).n) : "0";
@@ -1961,10 +1794,14 @@
         + ` are excluded. Band is mean ±1σ.`
         + (pair.lev > 1 ? ` Multiply by ${pair.lev} for the ${pair.target}-price dislocation.` : "");
       document.getElementById("mv-diag-note").innerHTML = isFinite(st.beta)
-        ? `β is fitted in-sample on n=${st.n} and is <strong>reported only</strong> — the live model keeps its ×${bStr}`
+        ? `β is fitted on n=${st.n}; the live model uses a holdout-selected calibrated ×${bStr}`
           + ` (${pair.betaStory}).`
+          + (m.calibration && isFinite(m.calibration.raw)
+              ? ` Prior ×${trimNum(m.calibration.prior)}, raw through-origin ×${trimNum(m.calibration.raw)},`
+                + ` calibration weight ${Math.round(m.calibration.blend * 100)}%, holdout R²₀ ${isFinite(m.calibration.holdoutR2) ? m.calibration.holdoutR2.toFixed(2) : "–"}.`
+              : "")
           + ` ${Math.abs(st.tBeta) < 2 ? `×${bStr} is not rejected (|t|&lt;2).` : `×${bStr} is rejected (|t|≥2).`}`
-          + ` SE ±${st.seBeta.toFixed(2)} is wide at this sample size, so treat it as a scale check, not a calibration.`
+          + ` SE ±${st.seBeta.toFixed(2)} remains a scale check.`
           + ` Mean error t=${isFinite(st.tMean) ? sgn(st.tMean, 2) : "–"}.`
         : "Not enough history yet for a beta estimate.";
 
@@ -2056,6 +1893,113 @@
       }
     }
 
+    function calibratePairBeta(archS, archX, pair) {
+      const dates = Object.keys(archS)
+        .filter(d => d in archX && isTradingDay(d)).sort();
+      const rows = [];
+      const benchLev = pair.benchLev || 1;
+      for (let i = 1; i < dates.length; i++) {
+        const d0 = dates[i - 1], d1 = dates[i];
+        if (nextTradingDay(d0) !== d1) continue;
+        const x = (archX[d1] / archX[d0] - 1) / benchLev;
+        const y = (archS[d1] / archS[d0] - 1) / pair.lev;
+        if (isFinite(x) && isFinite(y)) rows.push({ x, y });
+      }
+      const prior = pair.beta;
+      if (rows.length < 20) return { beta: prior, prior, raw: NaN, blend: 0, n: rows.length, holdoutR2: NaN };
+      const split = Math.max(15, Math.floor(rows.length * 0.8));
+      if (split >= rows.length) return { beta: prior, prior, raw: NaN, blend: 0, n: rows.length, holdoutR2: NaN };
+      let sxx = 0, sxy = 0;
+      for (let i = 0; i < split; i++) { sxx += rows[i].x ** 2; sxy += rows[i].x * rows[i].y; }
+      if (!(sxx > 0)) return { beta: prior, prior, raw: NaN, blend: 0, n: rows.length, holdoutR2: NaN };
+      const raw = sxy / sxx;
+      const blends = [0, 0.25, 0.5, 0.75, 1];
+      let best = null;
+      for (const blend of blends) {
+        const beta = prior + blend * (raw - prior);
+        let rss = 0;
+        for (let i = split; i < rows.length; i++) {
+          const w = Math.pow(0.5, (rows.length - 1 - i) / 20);
+          rss += w * (rows[i].y - beta * rows[i].x) ** 2;
+        }
+        if (!best || rss < best.rss) best = { blend, beta, rss };
+      }
+      let holdoutRss = 0, holdoutTss0 = 0;
+      for (let i = split; i < rows.length; i++) {
+        const w = Math.pow(0.5, (rows.length - 1 - i) / 20);
+        holdoutRss += w * (rows[i].y - best.beta * rows[i].x) ** 2;
+        holdoutTss0 += w * rows[i].y ** 2;
+      }
+      return {
+        beta: best.beta, prior, raw, blend: best.blend, n: rows.length,
+        holdoutR2: holdoutTss0 > 0 ? 1 - holdoutRss / holdoutTss0 : NaN
+      };
+    }
+
+    function applyDailyBetaCalibrationCache() {
+      let saved;
+      try { saved = JSON.parse(localStorage.getItem(BETA_CALIBRATION_CACHE_KEY) || "null"); }
+      catch (e) { saved = null; }
+      const today = nyParts(Date.now()).date;
+      if (!saved || saved.date !== today || !saved.pairs) return false;
+      for (const [key, result] of Object.entries(saved.pairs)) {
+        const pair = PAIRS[key];
+        if (!pair || !result || !Number.isFinite(result.beta)) continue;
+        pair.liveBeta = result.beta;
+        pair.liveCalibration = result;
+      }
+      return Object.keys(saved.pairs).length >= Object.keys(PAIRS).length;
+    }
+
+    async function runDailyBetaCalibration() {
+      if (applyDailyBetaCalibrationCache()) return;
+      const today = nyParts(Date.now()).date;
+      const names = [...new Set(Object.values(PAIRS).flatMap(pair => [pair.target, pair.bench]))]
+        .filter(key => marketMap[key]);
+      if (!names.length) return;
+      const settled = await allSettledLimited(names, HISTORY_FETCH_CONCURRENCY, async key => {
+        const candles = await fetchCandles(marketMap[key].fullName, HISTORY_DAYS);
+        return [key, indexCandles(candles).anchors];
+      });
+      const anchors = {};
+      for (const result of settled) {
+        if (result.status !== "fulfilled") continue;
+        const [key, fresh] = result.value;
+        anchors[key] = mergeArchive(key, fresh);
+      }
+
+      const calibrations = {};
+      for (const [key, pair] of Object.entries(PAIRS)) {
+        if (!anchors[pair.target] || !anchors[pair.bench]) continue;
+        const calibration = calibratePairBeta(anchors[pair.target], anchors[pair.bench], pair);
+        pair.liveBeta = calibration.beta;
+        pair.liveCalibration = calibration;
+        calibrations[key] = calibration;
+
+        const state = modelStates[key];
+        if (state) {
+          const updated = buildModel(anchors[pair.target], anchors[pair.bench],
+            state.idxS, state.idxX, pair.lev, calibration.beta, pair.benchLev);
+          Object.assign(state, updated);
+          state.beta = calibration.beta;
+          state.calibration = calibration;
+        }
+      }
+
+      if (Object.keys(calibrations).length) {
+        try {
+          localStorage.setItem(BETA_CALIBRATION_CACHE_KEY, JSON.stringify({
+            date: today, savedAt: Date.now(), pairs: calibrations
+          }));
+        } catch (e) {}
+        if (currentView === "model" && modelStates[activePairKey]) renderModelView();
+        if (currentView === "detail") {
+          isDirty = true;
+          flushUpdatesToDOM();
+        }
+      }
+    }
+
     async function loadModelHistory(pairKey) {
       if (modelLoading[pairKey]) return;
       const pair = PAIRS[pairKey];
@@ -2072,10 +2016,13 @@
           fetchCandles(s.fullName, HISTORY_DAYS), fetchCandles(x.fullName, HISTORY_DAYS)
         ]);
         const idxS = indexCandles(hs), idxX = indexCandles(hx);
-        const m = buildModel(mergeArchive(pair.target, idxS.anchors), mergeArchive(pair.bench, idxX.anchors),
-                             idxS, idxX, pair.lev, pair.beta, pair.benchLev);
+        const archS = mergeArchive(pair.target, idxS.anchors);
+        const archX = mergeArchive(pair.bench, idxX.anchors);
+        const calibration = pair.liveCalibration || null;
+        const beta = effectiveBeta(pair);
+        const m = buildModel(archS, archX, idxS, idxX, pair.lev, beta, pair.benchLev);
         m.idxS = idxS; m.idxX = idxX; m.pair = pair; m.lev = pair.lev;
-        m.beta = pair.beta; m.benchLev = pair.benchLev || 1;
+        m.beta = beta; m.calibration = calibration; m.benchLev = pair.benchLev || 1;
         const dates = Object.keys(idxS.anchorMs).filter(d => idxX.anchorMs[d] != null && isTradingDay(d)).sort();
         m.todayAnchor = dates[dates.length - 1];
         if (!m.todayAnchor || m.clean.length < 3) {
@@ -2119,6 +2066,7 @@
     }
 
     async function initDashboard() {
+      applyDailyBetaCalibrationCache();
       const lastCloseMs = getLastUSCloseMs();
       const cacheKey = `${CACHE_PREFIX}${lastCloseMs}`;
       let cachedCloses = JSON.parse(localStorage.getItem(cacheKey) || "{}");
@@ -2266,6 +2214,9 @@
       cacheDOMPointers();
       isDirty = true; 
       flushUpdatesToDOM();
+      // Run once per New York calendar day after the live instrument map is ready. Current-day
+      // cached calibrations are applied above before the first dashboard render.
+      runDailyBetaCalibration().catch(err => console.warn("Daily beta calibration failed:", err));
       
       // force each tick: ages and connection state advance with the clock, not with messages
       setInterval(() => { isDirty = true; flushUpdatesToDOM(); }, 1000);
