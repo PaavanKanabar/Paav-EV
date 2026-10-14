@@ -300,6 +300,7 @@
     const url = "https://api.hyperliquid.xyz/info";
     const wsUrl = "wss://api.hyperliquid.xyz/ws";
     const DEX_LIST = ["xyz", "para", "mkts", "io", ""];
+    const XYZ_ONLY = new Set(["EWY", "KIOXIA", "MRNA", "SPCX", "SILVER", "NBIS", "AAPL"]);
 
     const CANDLE_MS = 15 * 60 * 1000;
     const HISTORY_DAYS = 140;                // ~90 NYSE trading days after weekends/holidays
@@ -456,7 +457,24 @@
       MSTR: { bench: "BTC", beta: 1.80, threshold: 2.00 },
       COIN: { bench: "BTC", beta: 1.40, threshold: 1.50 },
       IREN: { bench: "BTC", beta: 1.50, threshold: 2.00 },
-      HOOD: { bench: "BTC", beta: 0.90, threshold: 1.25 }
+      HOOD: { bench: "BTC", beta: 0.90, threshold: 1.25 },
+      KIOXIA: { bench: "XYZ100", beta: 5.4, threshold: 2.10,
+        macro: ["XYZ100", "SOXL"],
+        peers: ["NVDA", "AMD", "MU", "TSM", "WDC", "SNDK", "SKHX", "SOXL"],
+        peersTitle: "Semiconductors & Memory Peers",
+        story: "provisional rounded 5.4 beta to XYZ100 from 34 anchor periods; R² 0.17 and 1-day residual σ 4.228%; daily calibration may update it" },
+      MRNA: { bench: "SP500", beta: 2.3, threshold: 2.50,
+        macro: ["SP500", "XYZ100"], peers: MACRO_PEERS, peersTitle: "Macro & Market Peers",
+        story: "provisional rounded 2.3 beta to SP500 from 34 anchor periods; R² 0.07 and 1-day residual σ 5.049%; daily calibration may update it" },
+      SPCX: { bench: "XYZ100", beta: 1.6, threshold: 1.30,
+        peers: ["TSLA", "XYZ100", "SP500", "AAPL", "MSFT"], peersTitle: "Space & Growth Peers",
+        story: "provisional rounded 1.6 beta to XYZ100 from 34 anchor periods; R² 0.26 and 1-day residual σ 2.595%; daily calibration may update it" },
+      SILVER: { bench: "GOLD", beta: 1.6, threshold: 0.75,
+        macro: ["GOLD", "SP500"], peers: ["GOLD", "COPPER", "CL", "TLT", "SP500"],
+        peersTitle: "Precious Metals & Macro Peers",
+        story: "provisional rounded 1.6 beta to GOLD from 34 anchor periods; R² 0.79 and 1-day residual σ 1.520%; daily calibration may update it" },
+      NBIS: { bench: "XYZ100", beta: 2.9, threshold: 1.90,
+        story: "provisional rounded 2.9 beta to XYZ100 from 34 anchor periods; R² 0.40 and 1-day residual σ 3.845%; daily calibration may update it" }
     };
     for (const [tkr, model] of Object.entries(GENERAL_MODELS)) {
       const crypto = model.bench === "BTC";
@@ -469,6 +487,16 @@
         betaStory: model.story || `provisional fixed ${model.beta.toFixed(2)} beta to ${model.bench}; compare with fitted β in Diagnostics`
       };
     }
+
+    // EWY vs XYZ100: rounded initial beta from 34 overlapping complete anchor periods.
+    // The existing daily holdout calibration can update it. Initial daily residual sigma
+    // was ~1.710%; use the same 0.5-sigma, 0.05%-grid hurdle convention as the semis models.
+    PAIRS.EWY = {
+      target: "EWY", bench: "XYZ100", lev: 1, beta: 2.1, threshold: 0.85,
+      title: "EWY ANALYSIS", macro: ["XYZ100", "SP500"],
+      heavies: ["SMSN", "SKHX", "SKHY", "XYZ100", "SP500"], heaviesTitle: "Korea / Market Peers",
+      betaStory: "initial rounded 2.1 beta to XYZ100 from 34 complete anchor periods; 1-day residual sigma about 1.710%; updated by the existing daily calibration"
+    };
 
     // Human labels for the macro strip. Anything absent falls back to the bare ticker.
     const NICE_NAME = {
@@ -500,14 +528,16 @@
       { category: "MACRO", subgroups: [
         // QQQ and IWM are not listed on Hyperliquid on any dex, so they never rendered.
         // SP500 (xyz, ~$40M/24h) replaces US500 (mkts, ~$3M/24h at a 1/10 scale quote).
-        { name: "Equity Indices", tickers: ["SP500", "XYZ100"] },
+        { name: "Equity Indices", tickers: ["SP500", "XYZ100", "EWY"] },
         // WTIOIL is not listed on any dex either; CL is the crude contract that is.
-        { name: "Commodities & Rates", tickers: ["NATGAS", "COPPER", "CL", "GOLD", "TLT"] }
+        { name: "Commodities & Rates", tickers: ["NATGAS", "COPPER", "CL", "GOLD", "SILVER", "TLT"] }
       ]},
       { category: "THEMATICS", subgroups: [
         { name: "Semiconductors & Equipment", tickers: ["NVDA", "AMD", "TSM", "AVGO", "INTC", "MU", "DRAM",
-                                                         "MRVL", "WDC", "ARM", "SMSN", "SKHX", "SKHY", "SNDK", "SOXL"] },
-        { name: "AI & Mega-Cap Tech", tickers: ["AAPL", "GOOGL", "META", "AMZN", "MSFT", "TSLA", "PLTR"] },
+                                                         "MRVL", "WDC", "KIOXIA", "ARM", "SMSN", "SKHX", "SKHY", "SNDK", "SOXL"] },
+        { name: "Biotechnology & Pharma", tickers: ["MRNA"] },
+        { name: "Space & Aerospace", tickers: ["SPCX"] },
+        { name: "AI & Mega-Cap Tech", tickers: ["AAPL", "GOOGL", "META", "AMZN", "MSFT", "TSLA", "PLTR", "NBIS"] },
         { name: "Crypto & On-Chain", tickers: ["MSTR", "COIN", "IREN", "HOOD"] }
       ]}
     ];
@@ -2112,6 +2142,7 @@
               };
 
               let fk = uName.toUpperCase(), bk = base.toUpperCase();
+              if (XYZ_ONLY.has(bk) && fk !== `XYZ:${bk}`) continue;
               if (fk !== bk) marketMap[fk] = entry;
               if (winsBaseKey(entry, baseOwner[bk])) {
                 baseOwner[bk] = entry;
