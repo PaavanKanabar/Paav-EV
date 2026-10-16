@@ -143,10 +143,11 @@
       <h1>HYPERLIQUID DESK</h1>
       <div class="status-wrap">
         <div class="status-line"><span class="dot" id="dot-main"></span><span id="conn-main">connecting…</span></div>
-        <div class="status-sub" id="base-main">vs 4 PM EST</div>
+        <div class="status-sub" id="base-main">vs 4 PM ET</div>
       </div>
     </div>
-    <div id="loading">Syncing order books...</div>
+    <div id="loading" role="status" aria-live="polite">Connecting to market data…</div>
+    <button class="history-retry" id="startup-retry" onclick="retryStartup()" hidden>Retry unavailable data</button>
     <div id="content"></div>
   </div>
 
@@ -159,7 +160,7 @@
       </div>
       <div class="status-wrap">
         <div class="status-line"><span class="dot" id="dot-dt"></span><span id="conn-dt">connecting…</span></div>
-        <div class="status-sub" id="base-dt">vs 4 PM EST</div>
+        <div class="status-sub" id="base-dt">vs 4 PM ET</div>
       </div>
     </div>
 
@@ -256,6 +257,7 @@
         <div class="stat"><div class="stat-k">σ this hour</div><div class="stat-v" id="mv-signow">–</div></div>
         <div class="stat"><div class="stat-k">× daily σ</div><div class="stat-v" id="mv-z">–</div></div>
       </div>
+      <div class="chart-note" id="mv-live-status" role="status"></div>
     </div>
 
     <div class="detail-section">
@@ -444,7 +446,8 @@
     const SPREAD_SCREEN_MIN_N = 15;
     const SPREAD_SCREEN_MIN_R2 = 0.05;
     const HISTORY_FETCH_CONCURRENCY = 6;
-    const CACHE_PREFIX = "hl_close_v2_";   // v2: v1 caches hold the wrong (16:15) baseline
+    // Only exact, venue-qualified 4 PM snapshots are accepted in this namespace.
+    const CACHE_PREFIX = "hl_close_v3_";
     const STALE_WARN_MS = 60 * 1000;
     const STALE_BAD_MS = 5 * 60 * 1000;
     const WS_PING_MS = 30 * 1000;          // HL closes idle sockets ~60s
@@ -653,6 +656,10 @@
     let connState = "connecting";          // connecting | live | reconnecting
     let reconnectAttempts = 0;
     let lastMsgMs = 0;
+    let baselineCloseMs = null, baselineCache = {}, baselinePromise = null;
+    let baselineRetryAt = 0, baselineRequests = 0;
+    let marketDiscoveryComplete = false;
+    const failedDexes = new Set();
 
     // base ticker -> aggregated top-5 book. Sizes drive the imbalance bar; notionals are what
     // the depth read has to be in, since an index quoted at 29531 and one at 7632 have
@@ -725,14 +732,10 @@
     function pickCloseCandle(hist, closeMs) {
       if (!Array.isArray(hist) || hist.length === 0) return null;
       const targetOpen = closeMs - CANDLE_MS;
-      const exact = hist.find(k => Number(k.t) === targetOpen);
-      if (exact) return { px: parseFloat(exact.c), src: "snap" };
-      // thin name with no print in the closing 15m: last candle that ended at or before 4 PM
-      const prior = hist.filter(k => Number(k.t) + CANDLE_MS <= closeMs)
-                        .sort((a, b) => Number(a.t) - Number(b.t))
-                        .pop();
-      if (prior) return { px: parseFloat(prior.c), src: "prior" };
-      return null;
+      const exact = hist.find(k => k && Number(k.t) === targetOpen
+        && Number.isFinite(Number(k.c)) && Number(k.c) > 0
+        && (k.T == null || (Number(k.T) >= closeMs - 1 && Number(k.T) <= closeMs)));
+      return exact ? { px: Number(exact.c), src: "snap" } : null;
     }
 
     function ageOf(item) {
@@ -780,9 +783,11 @@
       let degraded = 0;
       for (const key of activeKeys) {
         const item = marketMap[key];
-        if (item && item.closeSource && item.closeSource !== "snap") degraded++;
+        if (item && !hasVerifiedBaseline(item)) degraded++;
       }
-      const baseTxt = degraded > 0 ? `vs 4 PM EST · ${degraded} baseline${degraded > 1 ? "s" : ""} approx` : "vs 4 PM EST";
+      const date = baselineCloseMs ? nyParts(baselineCloseMs).date.slice(5) : "";
+      const baseTxt = `vs 4 PM ET${date ? " · " + date : ""}`
+        + (degraded ? ` · ${degraded} pending` : "");
 
       // "mv" has a dot but no baseline sub-line; the `if (base)` guard covers that.
       for (const sfx of ["main", "dt", "mv"]) {
@@ -796,27 +801,22 @@
           base.style.color = degraded > 0 ? "var(--warn)" : "var(--text-dim)";
         }
       }
+      renderStartupStatus();
     }
 
-    function getLastUSCloseMs() {
-      let now = new Date();
-      for (let daysBack = 0; daysBack < 7; daysBack++) {
-        let testDate = new Date(now.getTime() - (daysBack * 24 * 60 * 60 * 1000));
-        let nyStr = testDate.toLocaleString("en-US", { timeZone: "America/New_York", hour12: false });
-        let [datePart, timePart] = nyStr.split(", ");
-        let [m, d, y] = datePart.split("/");
-        let hr = parseInt(timePart.split(":")[0]);
-        let dayOfWeek = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-        
-        if (daysBack === 0 && hr < 16) continue;
-        if (dayOfWeek === 0 || dayOfWeek === 6) continue;
-        
+    function getLastUSCloseMs(nowMs = Date.now()) {
+      const [y, m, d] = nyParts(nowMs).date.split("-").map(Number);
+      const today = Date.UTC(y, m - 1, d);
+      for (let daysBack = 0; daysBack < 15; daysBack++) {
+        const day = today - daysBack * 86400000;
+        const date = new Date(day).toISOString().slice(0, 10);
+        if (!isTradingDay(date)) continue;
         for (let utcHour = 19; utcHour <= 22; utcHour++) {
-           let exactMs = Date.UTC(y, m - 1, d, utcHour, 0, 0);
-           let exactNyHr = parseInt(new Intl.DateTimeFormat("en-US", {timeZone: "America/New_York", hour: "numeric", hour12: false}).format(new Date(exactMs)));
-           if (exactNyHr === 16) return exactMs;
+          const exactMs = day + utcHour * 3600000;
+          if (nyParts(exactMs).hour === 16 && exactMs <= nowMs) return exactMs;
         }
       }
+      throw new Error("No completed 4 PM trading-day baseline found");
     }
 
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -1186,14 +1186,16 @@
     function flushUpdatesToDOM() {
       if (!isDirty) return;
       isDirty = false;
-
+      ensureBaselineSession();
+      if (marketDiscoveryComplete && !baselinePromise && Date.now() >= baselineRetryAt
+          && selectedAssets().some(item => !hasVerifiedBaseline(item))) loadBaselines();
       renderStatus();
 
       for (const key of activeKeys) {
         let item = marketMap[key];
         if (!item) continue;
         // no usable baseline -> NaN, which renders as "–" rather than a fake 0.00%
-        item.rawPct = item.closePrice > 0
+        item.rawPct = hasVerifiedBaseline(item) && item.livePrice > 0
           ? ((item.livePrice - item.closePrice) / item.closePrice) * 100
           : NaN;
       }
@@ -1428,7 +1430,7 @@
 
       const stopTimers = () => { clearInterval(pingTimer); clearInterval(watchdogTimer); pingTimer = watchdogTimer = null; };
 
-      sock.onopen = async () => {
+      sock.onopen = () => {
         connState = "live";
         reconnectAttempts = 0;
         lastMsgMs = Date.now();
@@ -1445,17 +1447,7 @@
           if (Date.now() - lastMsgMs > WS_WATCHDOG_MS) { try { sock.close(); } catch (e) {} }
         }, 5000);
 
-        let coinsToSub = new Set();
-        for (const key of activeKeys) {
-           let item = marketMap[key];
-           if (item && item.fullName) coinsToSub.add(item.fullName);
-        }
-
-        for (const coin of coinsToSub) {
-            if (sock.readyState !== WebSocket.OPEN) return;
-            sock.send(JSON.stringify({ method: "subscribe", subscription: { type: "l2Book", coin: coin } }));
-            await sleep(10);
-        }
+        subscribeActiveMarkets(sock);
       };
 
       sock.onmessage = (event) => {
@@ -1500,8 +1492,12 @@
                   let l = levels[1][i], sz = parseFloat(l.sz);
                   aSz += sz; aNtl += sz * parseFloat(l.px);
                }
-               books[item.baseName.toUpperCase()] =
-                  { bidSz: bSz, askSz: aSz, bidNtl: bNtl, askNtl: aNtl, spreadBps: item.spreadBps };
+                // A later venue response may select a different owner during discovery.
+                // Books from an already-subscribed losing venue must not overwrite it.
+                if (marketMap[item.baseName.toUpperCase()] === item) {
+                  books[item.baseName.toUpperCase()] =
+                     { bidSz: bSz, askSz: aSz, bidNtl: bNtl, askNtl: aNtl, spreadBps: item.spreadBps };
+                }
            }
         }
       };
@@ -1517,6 +1513,18 @@
       };
 
       sock.onerror = () => { /* onclose always follows; handled there */ };
+    }
+
+    async function subscribeActiveMarkets(sock = ws) {
+      if (!sock || sock.readyState !== WebSocket.OPEN) return;
+      if (!sock.subscribedCoins) sock.subscribedCoins = new Set();
+      for (const item of selectedAssets()) {
+        if (sock.readyState !== WebSocket.OPEN) return;
+        if (sock.subscribedCoins.has(item.fullName)) continue;
+        sock.subscribedCoins.add(item.fullName);
+        sock.send(JSON.stringify({ method: "subscribe", subscription: { type: "l2Book", coin: item.fullName } }));
+        await sleep(10);
+      }
     }
 
     // Oracle + funding poll. `metaAndAssetCtxs` carries oraclePx AND funding in one response,
@@ -1544,8 +1552,7 @@
           let payload = { type: "metaAndAssetCtxs" };
           if (dex) payload.dex = dex;
           try {
-            let res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-            let data = await res.json();
+            let data = await requestInfo(payload);
             if (data && data[0] && data[1]) {
               let universe = data[0].universe;
               let ctxs = data[1];
@@ -1752,6 +1759,8 @@
       // is "we have no data". Dropping the tip leaves the path ending at the last real candle.
       const s = marketMap[m.pair.target], x = marketMap[m.pair.bench];
       if (s && x && s.livePrice > 0 && x.livePrice > 0
+          && hasVerifiedBaseline(s) && hasVerifiedBaseline(x)
+          && aMs + CANDLE_MS === baselineCloseMs
           && Math.max(ageOf(s), ageOf(x)) <= STALE_WARN_MS) {
          pts.push({ k: (Date.now() - aMs) / CANDLE_MS,
                     e: ((s.livePrice / s0 - 1) / lev
@@ -1869,7 +1878,7 @@
     // Keyed by pair: both pairs render into the same #mv-* DOM, so switching between them must
     // not discard the other's fetched history (or, worse, draw one pair's path on the other's
     // scales). `modelState()` is the accessor everything below reads.
-    let modelStates = {}, modelLoading = {};
+    let modelStates = {}, modelLoading = {}, modelAnchorRetryAt = {};
     const modelState = () => modelStates[activePairKey] || null;
 
     function coneAt(cone, k) {
@@ -2008,13 +2017,37 @@
     function updateModelLive() {
       const m = modelState();
       if (!m || !m.scale) return;
+      const target = marketMap[m.pair.target], benchmark = marketMap[m.pair.bench];
+      const currentAnchor = baselineCloseMs - CANDLE_MS;
+      const ready = target && benchmark && hasVerifiedBaseline(target) && hasVerifiedBaseline(benchmark)
+        && m.idxS.anchorMs[m.todayAnchor] === currentAnchor
+        && m.idxX.anchorMs[m.todayAnchor] === currentAnchor;
+      const note = document.getElementById("mv-live-status");
+      if (note) note.innerText = ready ? ""
+        : "Current comparison needs both exact 4 PM baselines and current-anchor history. Historical charts remain available.";
+      if (!ready) {
+        const path = document.getElementById("mv-today-path"), dot = document.getElementById("mv-today-dot");
+        if (path) path.setAttribute("d", "");
+        if (dot) dot.style.display = "none";
+        for (const id of ["mv-now", "mv-signow", "mv-z"]) {
+          const el = document.getElementById(id);
+          el.innerText = "–";
+          el.className = "stat-v neutral";
+        }
+        if (target && benchmark && hasVerifiedBaseline(target) && hasVerifiedBaseline(benchmark)
+            && !modelLoading[activePairKey] && Date.now() >= (modelAnchorRetryAt[activePairKey] || 0)) {
+          modelAnchorRetryAt[activePairKey] = Date.now() + 30000;
+          loadModelHistory(activePairKey, true);
+        }
+        return;
+      }
       const today = buildTodayPath(m);
       m.today = today;
       if (!today.length) return;
       const last = today[today.length - 1];
       const path = document.getElementById("mv-today-path"), dot = document.getElementById("mv-today-dot");
       if (path) path.setAttribute("d", `M${today.map(p => `${m.scale.X(p.k).toFixed(1)},${m.scale.Y(p.e).toFixed(1)}`).join(" L")}`);
-      if (dot) { dot.setAttribute("cx", m.scale.X(last.k).toFixed(1)); dot.setAttribute("cy", m.scale.Y(last.e).toFixed(1)); }
+      if (dot) { dot.style.display = ""; dot.setAttribute("cx", m.scale.X(last.k).toFixed(1)); dot.setAttribute("cy", m.scale.Y(last.e).toFixed(1)); }
 
       const cp = coneAt(m.cone, last.k);
       const thr = m.pair.threshold;
@@ -2262,31 +2295,163 @@
       btn.innerText = show ? "Hide data table ›" : "Show data table ›";
     }
 
-    async function initDashboard() {
-      applyDailyBetaCalibrationCache();
-      const lastCloseMs = getLastUSCloseMs();
-      const cacheKey = `${CACHE_PREFIX}${lastCloseMs}`;
-      let cachedCloses = JSON.parse(localStorage.getItem(cacheKey) || "{}");
+    function selectedAssets() {
+      return [...new Set([...activeKeys].map(key => marketMap[key]).filter(Boolean))];
+    }
 
-      // purge stale keys AND any v1 cache, which holds the pre-fix 16:15 baselines
-      Object.keys(localStorage).forEach(key => {
-        if (key.startsWith("hl_close_") && key !== cacheKey) localStorage.removeItem(key);
+    function hasVerifiedBaseline(item) {
+      return item.closeSource === "snap" && item.closeMs === baselineCloseMs
+        && item.closeCoin === item.fullName && Number.isFinite(item.closePrice) && item.closePrice > 0;
+    }
+
+    function restoreBaseline(item) {
+      const cached = baselineCache[item.fullName];
+      const valid = cached && cached.coin === item.fullName && cached.closeMs === baselineCloseMs
+        && cached.openMs === baselineCloseMs - CANDLE_MS && cached.src === "snap"
+        && Number.isFinite(cached.px) && cached.px > 0;
+      item.closePrice = valid ? cached.px : NaN;
+      item.closeSource = valid ? "snap" : "pending";
+      item.closeMs = valid ? baselineCloseMs : null;
+      item.closeCoin = valid ? item.fullName : null;
+      item.rawPct = NaN;
+    }
+
+    function ensureBaselineSession() {
+      const closeMs = getLastUSCloseMs();
+      if (baselineCloseMs === closeMs) return false;
+      baselineCloseMs = closeMs;
+      baselineRetryAt = 0;
+      const key = `${CACHE_PREFIX}${closeMs}`;
+      baselineCache = {};
+      try {
+        const cached = JSON.parse(localStorage.getItem(key) || "{}");
+        if (cached && typeof cached === "object" && !Array.isArray(cached)) baselineCache = cached;
+        // Do not migrate older caches: they may contain nearest-candle substitutes
+        // or values for a different venue under the same base ticker.
+        for (const oldKey of Object.keys(localStorage)) {
+          if (oldKey.startsWith("hl_close_") && oldKey !== key) localStorage.removeItem(oldKey);
+        }
+      } catch (error) {
+        console.warn("Baseline cache unavailable; exact baselines will be fetched.", error);
+      }
+      for (const item of selectedAssets()) restoreBaseline(item);
+      return true;
+    }
+
+    async function requestInfo(payload, timeoutMs = 7000) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetch(url, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload), signal: controller.signal
+        });
+        if (!response.ok) throw new Error(`Hyperliquid HTTP ${response.status}`);
+        return await response.json();
+      } catch (error) {
+        if (error.name === "AbortError") throw new Error("Hyperliquid request timed out");
+        throw error;
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+
+    function renderStartupStatus() {
+      const label = document.getElementById("loading");
+      const retry = document.getElementById("startup-retry");
+      if (!label || !retry) return;
+      const missing = selectedAssets().filter(item => !hasVerifiedBaseline(item));
+      let text = !marketDiscoveryComplete ? "Connecting to market data…" : "";
+      if (marketDiscoveryComplete && missing.length) {
+        text = baselinePromise
+          ? `Loading ${missing.length} exact 4 PM baseline${missing.length === 1 ? "" : "s"}…`
+          : `${missing.length} exact 4 PM baseline${missing.length === 1 ? " is" : "s are"} unavailable. Returns remain hidden.`;
+      }
+      if (failedDexes.size) text += `${text ? " " : ""}${failedDexes.size} venue${failedDexes.size === 1 ? "" : "s"} unavailable.`;
+      label.innerText = text;
+      label.style.display = text ? "block" : "none";
+      retry.hidden = !marketDiscoveryComplete || (!failedDexes.size && (!missing.length || !!baselinePromise));
+      retry.disabled = !!baselinePromise;
+      retry.innerText = failedDexes.size ? "Reload to retry unavailable venues" : "Retry 4 PM baselines";
+    }
+
+    function loadBaselines() {
+      if (baselinePromise) return baselinePromise;
+      ensureBaselineSession();
+      const closeMs = baselineCloseMs;
+      const missing = selectedAssets().filter(item => !hasVerifiedBaseline(item));
+      if (!missing.length) return Promise.resolve();
+      baselineRetryAt = Infinity;
+      baselinePromise = Promise.resolve().then(async () => {
+        // Leave a short finalisation margin at the close; never cache a live candle.
+        await sleep(Math.max(0, closeMs + 2000 - Date.now()));
+        let nextStart = Date.now();
+        await allSettledLimited(missing, 3, async asset => {
+          if (closeMs !== baselineCloseMs) return;
+          const startAt = Math.max(Date.now(), nextStart);
+          nextStart = startAt + 100;
+          await sleep(Math.max(0, startAt - Date.now()));
+          if (closeMs !== baselineCloseMs) return;
+          try {
+            baselineRequests++;
+            const hist = await requestInfo({
+              type: "candleSnapshot", req: {
+                coin: asset.fullName, interval: "15m",
+                startTime: closeMs - CANDLE_MS, endTime: closeMs - 1
+              }
+            });
+            const pick = pickCloseCandle(hist, closeMs);
+            if (!pick) throw new Error("Exact 4 PM candle not available");
+            // A late response for yesterday's anchor must never repopulate today's rows.
+            if (closeMs !== baselineCloseMs || marketMap[asset.baseName.toUpperCase()] !== asset) return;
+            baselineCache[asset.fullName] = {
+              coin: asset.fullName, closeMs, openMs: closeMs - CANDLE_MS,
+              px: pick.px, src: "snap"
+            };
+            restoreBaseline(asset);
+            // Save each success immediately, even if the page closes before the batch ends.
+            try { localStorage.setItem(`${CACHE_PREFIX}${closeMs}`, JSON.stringify(baselineCache)); }
+            catch (error) { console.warn("Could not persist 4 PM baseline cache.", error); }
+          } catch (error) {
+            if (closeMs === baselineCloseMs) {
+              asset.closeSource = "unavailable";
+              console.warn(`${asset.fullName}: ${error.message}`);
+            }
+          }
+          isDirty = true;
+          flushUpdatesToDOM();
+        });
+      }).finally(() => {
+        baselinePromise = null;
+        baselineRetryAt = closeMs === baselineCloseMs ? Date.now() + 30000 : 0;
+        isDirty = true;
+        flushUpdatesToDOM();
       });
+      renderStartupStatus();
+      return baselinePromise;
+    }
 
+    function retryStartup() {
+      if (failedDexes.size) { window.location.reload(); return; }
+      baselineRetryAt = 0;
+      loadBaselines();
+    }
+
+    async function discoverMarkets() {
       const fetchDex = async (dex, dexRank) => {
         let payload = { type: "metaAndAssetCtxs" };
         if (dex) payload.dex = dex;
         try {
-          let res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-          let data = await res.json();
-          if (data && data[0] && data[1]) {
+          const data = await requestInfo(payload);
+          if (!Array.isArray(data?.[0]?.universe) || !Array.isArray(data?.[1])
+              || data[0].universe.length !== data[1].length) throw new Error("Invalid market response");
+          {
             let universe = data[0].universe;
             let ctxs = data[1];
             for (let i = 0; i < universe.length; i++) {
               let uName = universe[i].name;
               let base = uName.includes(":") ? uName.split(":")[1] : uName;
               let mark = parseFloat(ctxs[i].markPx || 0);
-              let prev = parseFloat(ctxs[i].prevDayPx || mark);
               let oracle = parseFloat(ctxs[i].oraclePx || mark);
 
               let entry = {
@@ -2302,64 +2467,40 @@
                 oracleMs: Date.now(),
                 volume: parseFloat(ctxs[i].dayNtlVlm || 0),
                 rawPct: NaN,
-                closePrice: prev,
-                closeSource: "prevDay",
+                closePrice: NaN,
+                closeSource: "pending",
                 lastTickMs: Date.now(),   // the REST mark IS fresh right now; age tracks the price on screen
                 spreadBps: Infinity
               };
 
               let fk = uName.toUpperCase(), bk = base.toUpperCase();
               if (XYZ_ONLY.has(bk) && fk !== `XYZ:${bk}`) continue;
+              restoreBaseline(entry);
               if (fk !== bk) marketMap[fk] = entry;
               if (winsBaseKey(entry, baseOwner[bk])) {
+                if (marketMap[bk] !== entry) delete books[bk];
                 baseOwner[bk] = entry;
                 marketMap[bk] = entry;
               }
             }
           }
-        } catch(e) {}
+        } catch(error) {
+          failedDexes.add(dex);
+          console.warn(`Market venue ${dex || "main"} unavailable: ${error.message}`);
+        } finally {
+          // Prices and verified cached returns can appear as each venue responds.
+          // Pair navigation becomes available once source selection is complete.
+          renderDashboard();
+          subscribeActiveMarkets();
+        }
       };
 
       await Promise.all(DEX_LIST.map((d, i) => fetchDex(d, i)));
+      marketDiscoveryComplete = true;
+      renderDashboard();
+    }
 
-      let needsCacheUpdate = false;
-      document.getElementById("loading").innerText = "Syncing baselines...";
-
-      for (let base of activeKeys) {
-        let asset = marketMap[base];
-        if (!asset) continue;
-        let cached = cachedCloses[base];
-        if (cached && typeof cached === "object" && cached.px > 0) {
-          asset.closePrice = cached.px;
-          asset.closeSource = cached.src;
-          asset.rawPct = ((asset.livePrice - asset.closePrice) / asset.closePrice) * 100;
-        } else {
-          try {
-            await sleep(50);
-            let res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-              type: "candleSnapshot", req: {
-                coin: asset.fullName, interval: "15m",
-                startTime: lastCloseMs - (4 * CANDLE_MS),   // a few candles of fallback for thin names
-                endTime: lastCloseMs
-              }
-            })});
-            let hist = await res.json();
-            let pick = pickCloseCandle(hist, lastCloseMs);
-            if (pick && pick.px > 0) {
-              asset.closePrice = pick.px;
-              asset.closeSource = pick.src;
-              asset.rawPct = ((asset.livePrice - pick.px) / pick.px) * 100;
-              cachedCloses[base] = { px: pick.px, src: pick.src };
-              needsCacheUpdate = true;
-            }
-            // else: closePrice stays prevDayPx with closeSource "prevDay", which the
-            // status bar counts as degraded instead of passing it off as a 4 PM snap.
-          } catch(e) {}
-        }
-      }
-
-      if (needsCacheUpdate) localStorage.setItem(cacheKey, JSON.stringify(cachedCloses));
-
+    function renderDashboard() {
       let mainHtml = "";
       for (let section of taxonomy) {
         mainHtml += `<div class="category">${section.category}</div>`;
@@ -2367,8 +2508,10 @@
           let rowData = [];
           let seen = new Set();
           for (let sym of group.tickers) {
-            let item = marketMap[sym.toUpperCase()];
-            if (item && !seen.has(item.baseName)) { seen.add(item.baseName); rowData.push(item); }
+            let item = marketMap[sym.toUpperCase()] || {
+              baseName: sym, volume: 0, placeholder: true
+            };
+            if (!seen.has(item.baseName)) { seen.add(item.baseName); rowData.push(item); }
           }
           if (rowData.length === 0) continue;
           rowData.sort((a, b) => b.volume - a.volume);
@@ -2385,16 +2528,19 @@
           for (let item of rowData) {
             // A pair target opens its own detail view; everything else links straight to HL.
             let isPair = !!PAIRS[item.baseName.toUpperCase()];
-            let tag = isPair ? "div" : "a";
-            let attrs = isPair
+            let clickable = isPair && !item.placeholder && marketDiscoveryComplete;
+            let tag = isPair || item.placeholder ? "div" : "a";
+            let attrs = clickable
               ? `onclick="openDetail('${item.baseName.toUpperCase()}', event)"`
-              : `href="https://app.hyperliquid.xyz/trade/${item.fullName}" target="_blank"`;
+              : (!isPair && !item.placeholder ? `href="https://app.hyperliquid.xyz/trade/${item.fullName}" target="_blank"` : "");
 
             mainHtml += `
               <${tag} ${attrs} class="row">
                 <div class="ticker">
-                  <span class="ticker-name">${item.baseName}${isPair ? ' <span style="color: var(--accent)">›</span>' : ''}</span>
-                  <span class="ticker-vol">${item.dex} · ${formatVolume(item.volume)} 24h · <span id="age-${item.baseName}">–</span></span>
+                  <span class="ticker-name">${item.baseName}${clickable ? ' <span style="color: var(--accent)">›</span>' : ''}</span>
+                  <span class="ticker-vol">${item.placeholder
+                    ? (marketDiscoveryComplete ? "market unavailable" : "loading market…")
+                    : `${item.dex} · ${formatVolume(item.volume)} 24h · <span id="age-${item.baseName}">–</span>`}</span>
                 </div>
                 <div class="price" id="px-${item.baseName}">-</div>
                 <div class="ret" id="ret-${item.baseName}">-</div>
@@ -2405,21 +2551,40 @@
         }
       }
       
-      document.getElementById("loading").style.display = "none";
       document.getElementById("content").innerHTML = mainHtml;
 
       // The heavyweights list is per-pair and built by openDetail(), not here.
       cacheDOMPointers();
       isDirty = true; 
       flushUpdatesToDOM();
-      // Run once per New York calendar day after the live instrument map is ready. Current-day
-      // cached calibrations are applied above before the first dashboard render.
-      runDailyBetaCalibration().catch(err => console.warn("Daily beta calibration failed:", err));
-      
-      // force each tick: ages and connection state advance with the clock, not with messages
-      setInterval(() => { isDirty = true; flushUpdatesToDOM(); }, 1000);
+    }
+
+    async function initDashboard() {
+      const startedAt = Date.now();
+      applyDailyBetaCalibrationCache();
+      ensureBaselineSession();
+      renderDashboard();
+      // Establish the socket while venue discovery runs, not after baseline downloads.
       connectWebSocket();
+      setInterval(() => { isDirty = true; flushUpdatesToDOM(); }, 1000);
+      const resume = () => {
+        baselineRetryAt = 0;
+        isDirty = true;
+        flushUpdatesToDOM();
+      };
+      window.addEventListener("online", resume);
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) resume();
+      });
+      await discoverMarkets();
       pollOraclePrices();
+      loadBaselines().finally(() => {
+        // A cold start uses most of the first minute's REST budget for exact closes.
+        // Keep calibration history out of that burst; cached calibration still applies.
+        const delay = baselineRequests ? Math.max(1500, startedAt + 60000 - Date.now()) : 1500;
+        setTimeout(() => runDailyBetaCalibration()
+          .catch(err => console.warn("Daily beta calibration failed:", err)), delay);
+      });
     }
 
     initDashboard();
