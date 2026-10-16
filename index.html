@@ -300,7 +300,138 @@
     </div>
   </div>
 
-  <script src="./history-loader.js"></script>
+  <script>
+    /* Shared by model history, peer comparisons and daily beta calibration.
+       Hyperliquid only exposes the latest ~5,000 candles per interval; splitting an
+       older window into parallel requests does not extend that available history. */
+    globalThis.HistoryCandleLoader = class HistoryCandleLoader {
+      constructor({
+        fetcher = (...args) => fetch(...args),
+        timeoutMs = 12000,
+        cacheTtlMs = 60000,
+        backgroundGapMs = 6500,
+        retryDelayMs = 1000,
+        maxConcurrency = 2
+      } = {}) {
+        Object.assign(this, { fetcher, timeoutMs, cacheTtlMs, backgroundGapMs, retryDelayMs, maxConcurrency });
+        this.cache = new Map();
+        this.inFlight = new Map();
+        this.queue = [];
+        this.active = 0;
+        this.activeBackground = 0;
+        this.nextBackgroundAt = 0;
+        this.timer = null;
+      }
+
+      get(coin, days, { priority = "background", force = false } = {}) {
+        // Full venue-qualified names prevent data from different markets being mixed.
+        const key = `${coin}|15m|${days}`;
+        const previous = this.cache.get(key);
+        if (!force && previous && Date.now() - previous.fetchedAt < this.cacheTtlMs) {
+          return Promise.resolve(previous.candles);
+        }
+        const pending = this.inFlight.get(key);
+        if (pending) {
+          if (priority === "foreground") {
+            pending.priority = "foreground";
+            this.pump();
+          }
+          return pending.promise;
+        }
+        const task = { key, coin, days, priority, previous };
+        task.promise = new Promise((resolve, reject) => Object.assign(task, { resolve, reject }));
+        this.inFlight.set(key, task);
+        this.queue.push(task);
+        this.pump();
+        return task.promise;
+      }
+
+      pump() {
+        clearTimeout(this.timer);
+        this.timer = null;
+        while (this.active < this.maxConcurrency && this.queue.length) {
+          let index = this.queue.findIndex(task => task.priority === "foreground");
+          if (index < 0) {
+            if (this.activeBackground) break;
+            const wait = this.nextBackgroundAt - Date.now();
+            if (wait > 0) {
+              this.timer = setTimeout(() => this.pump(), wait);
+              break;
+            }
+            index = 0;
+          }
+          const task = this.queue.splice(index, 1)[0];
+          const background = task.priority !== "foreground";
+          this.active++;
+          if (background) this.activeBackground++;
+          this.download(task).then(candles => {
+            this.cache.set(task.key, { candles, fetchedAt: Date.now() });
+            task.resolve(candles);
+          }, error => task.reject(error)).finally(() => {
+            this.inFlight.delete(task.key);
+            this.active--;
+            if (background) this.activeBackground--;
+            this.pump();
+          });
+        }
+      }
+
+      async download(task) {
+        const candleMs = 15 * 60 * 1000;
+        const now = Date.now(), floor = now - task.days * 86400000;
+        const old = task.previous?.candles || [];
+        // Once warm, refresh the tail instead of downloading the entire sample again.
+        const startTime = old.length ? Math.max(floor, Number(old[old.length - 1].t) - candleMs) : floor;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+          let failure;
+          this.nextBackgroundAt = Date.now() + this.backgroundGapMs;
+          try {
+            const response = await this.fetcher("https://api.hyperliquid.xyz/info", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              signal: controller.signal,
+              body: JSON.stringify({
+                type: "candleSnapshot",
+                req: { coin: task.coin, interval: "15m", startTime, endTime: now }
+              })
+            });
+            if (!response.ok) {
+              const error = new Error(`${task.coin}: HTTP ${response.status}${response.status === 429 ? " (rate limited)" : ""}`);
+              error.retryable = response.status === 429 || response.status >= 500;
+              const retryAfter = response.headers?.get("Retry-After");
+              error.retryAfterMs = retryAfter
+                ? (Number.isFinite(Number(retryAfter)) ? Number(retryAfter) * 1000 : Math.max(0, Date.parse(retryAfter) - Date.now()))
+                : 0;
+              throw error;
+            }
+            const candles = await response.json();
+            if (!Array.isArray(candles) || candles.some(k => !k || !Number.isFinite(Number(k.t)) || !(Number(k.c) > 0))) {
+              const error = new Error(`${task.coin}: invalid candle response`);
+              error.retryable = false;
+              throw error;
+            }
+            const unique = new Map();
+            for (const candle of [...old, ...candles]) {
+              if (Number(candle.t) >= floor) unique.set(Number(candle.t), candle);
+            }
+            return [...unique.values()].sort((a, b) => Number(a.t) - Number(b.t)).slice(-5000);
+          } catch (error) {
+            failure = error.name === "AbortError"
+              ? Object.assign(new Error(`${task.coin}: history request timed out`), { retryable: true })
+              : error;
+          } finally {
+            clearTimeout(timeout);
+          }
+          const wait = Math.max(this.retryDelayMs, failure.retryAfterMs || 0);
+          // Don't retry a long server cooldown early, or keep the screen waiting for it.
+          if (attempt === 1 || failure.retryable === false || wait > 10000) throw failure;
+          await new Promise(resolve => setTimeout(resolve, wait));
+        }
+      }
+    };
+  </script>
   <script>
     const url = "https://api.hyperliquid.xyz/info";
     const wsUrl = "wss://api.hyperliquid.xyz/ws";
