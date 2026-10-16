@@ -108,6 +108,8 @@
     .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 10px; color: var(--text-dim); margin-top: 8px; align-items: center; }
     .legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; margin-right: 5px; vertical-align: -1px; }
     .toggle-tbl { color: var(--accent); font-size: 12px; margin-top: 12px; cursor: pointer; }
+    .history-retry { color: var(--accent); background: var(--surface); border: 1px solid var(--surface-card);
+                     border-radius: 6px; padding: 10px 14px; min-height: 44px; margin-top: 8px; font: inherit; cursor: pointer; }
     table.dt { width: 100%; border-collapse: collapse; font-family: "Menlo", monospace; font-size: 10px; font-variant-numeric: tabular-nums; }
     table.dt th { color: var(--text-dim); text-align: right; font-weight: 700; padding: 5px 3px; border-bottom: 1px solid var(--surface-card); }
     table.dt td { text-align: right; padding: 4px 3px; color: #D1D1D6; border-bottom: 1px solid var(--surface-header); }
@@ -246,6 +248,8 @@
     </div>
 
     <div class="detail-section">
+      <div class="chart-note" id="mv-load-status" role="status" aria-live="polite"></div>
+      <button type="button" class="history-retry" id="mv-retry" onclick="loadModelHistory(activePairKey, true)" hidden>Retry history</button>
       <div class="detail-title">Today vs history</div>
       <div class="stat-grid">
         <div class="stat"><div class="stat-k">Error now</div><div class="stat-v" id="mv-now">–</div></div>
@@ -296,6 +300,7 @@
     </div>
   </div>
 
+  <script src="./history-loader.js"></script>
   <script>
     const url = "https://api.hyperliquid.xyz/info";
     const wsUrl = "wss://api.hyperliquid.xyz/ws";
@@ -304,7 +309,6 @@
 
     const CANDLE_MS = 15 * 60 * 1000;
     const HISTORY_DAYS = 140;                // ~90 NYSE trading days after weekends/holidays
-    const CANDLE_CHUNK_DAYS = 45;            // stays below Hyperliquid's ~5,000-candle cap
     const BETA_CALIBRATION_CACHE_KEY = "hl_daily_beta_calibration_v1";
     const SPREAD_SCREEN_MIN_N = 15;
     const SPREAD_SCREEN_MIN_R2 = 0.05;
@@ -936,7 +940,8 @@
       if (screening) spreadScreenInFlight = true;
       try {
         const settled = await allSettledLimited(fetchable, HISTORY_FETCH_CONCURRENCY, async key => {
-          const hist = await fetchCandles(marketMap[key].fullName, HISTORY_DAYS);
+          const hist = await fetchCandles(marketMap[key].fullName, HISTORY_DAYS,
+            { priority: key === pair.target || key === pair.bench ? "foreground" : "background" });
           return [key, indexCandles(hist).anchors];
         });
         const anchors = {};
@@ -1485,24 +1490,9 @@
       return null;
     }
 
-    async function fetchCandles(coin, days) {
-      const now = Date.now(), floor = now - days * 86400000;
-      const ranges = [];
-      for (let end = now; end > floor; end -= CANDLE_CHUNK_DAYS * 86400000) {
-        ranges.push({
-          startTime: Math.max(floor, end - CANDLE_CHUNK_DAYS * 86400000),
-          endTime: end
-        });
-      }
-      const chunks = await Promise.all(ranges.map(async range => {
-        const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "candleSnapshot", req: { coin, interval: "15m", ...range } }) });
-        const h = await res.json();
-        return Array.isArray(h) ? h : [];
-      }));
-      const unique = new Map();
-      for (const chunk of chunks) for (const candle of chunk) unique.set(Number(candle.t), candle);
-      return [...unique.values()].sort((a, b) => Number(a.t) - Number(b.t));
+    const historyCandles = new HistoryCandleLoader();
+    function fetchCandles(coin, days, options) {
+      return historyCandles.get(coin, days, options);
     }
 
     function indexCandles(hist) {
@@ -2030,20 +2020,57 @@
       }
     }
 
-    async function loadModelHistory(pairKey) {
-      if (modelLoading[pairKey]) return;
+    function historyStatus(pairKey, text, retry = false) {
+      if (currentView !== "model" || activePairKey !== pairKey) return;
+      document.getElementById("mv-load-status").innerText = text;
+      document.getElementById("mv-retry").hidden = !retry;
+      document.getElementById("mv-retry").disabled = !!modelLoading[pairKey];
+    }
+
+    function resetModelView(pair) {
+      document.getElementById("mv-formula").innerText =
+        `${pair.target}${pair.lev > 1 ? "/" + pair.lev : ""} − ${pair.bench}${pair.benchLev > 1 ? "/" + pair.benchLev : ""}×${trimNum(effectiveBeta(pair))}`;
+      for (const id of ["mv-range", "mv-cone-n", "mv-now", "mv-signow", "mv-z",
+                        "mv-n", "mv-mean", "mv-sigma", "mv-beta", "mv-r2", "mv-btest"]) {
+        const el = document.getElementById(id);
+        el.innerText = "–";
+        if (el.classList.contains("stat-v")) el.className = "stat-v";
+      }
+      for (const id of ["mv-cone", "mv-bars", "mv-table", "mv-cone-note", "mv-bars-note", "mv-diag-note"]) {
+        document.getElementById(id).innerHTML = "";
+      }
+      document.getElementById("mv-bars-title").innerText = "Daily error, close → close";
+      document.getElementById("mv-btest-k").innerText = `β vs ${effectiveBeta(pair).toFixed(2)}`;
+      document.getElementById("mv-lg-rich").innerText = `${pair.target} rich`;
+      document.getElementById("mv-lg-cheap").innerText = `${pair.target} cheap`;
+      for (const id of ["mv-tip1", "mv-tip2"]) document.getElementById(id).style.opacity = 0;
+      document.getElementById("mv-table").style.display = "none";
+      document.getElementById("mv-tbl-toggle").innerText = "Show data table ›";
+    }
+
+    async function loadModelHistory(pairKey, force = false) {
       const pair = PAIRS[pairKey];
+      if (!pair) return;
+      if (modelLoading[pairKey]) {
+        historyStatus(pairKey, `Loading ${pair.target} / ${pair.bench} history…`);
+        return;
+      }
+      if (!force && modelStates[pairKey] && Date.now() - modelStates[pairKey].loadedAt < historyCandles.cacheTtlMs) {
+        historyStatus(pairKey, "");
+        return;
+      }
       const s = marketMap[pair.target], x = marketMap[pair.bench];
-      const note = document.getElementById("mv-cone-note");
       if (!s || !x) {
-        note.innerText = `${!s ? pair.target : pair.bench} is not listed on any of the configured venues.`;
+        historyStatus(pairKey, `${!s ? pair.target : pair.bench} is not listed on any of the configured venues.`);
         return;
       }
       modelLoading[pairKey] = true;
-      if (!modelStates[pairKey]) note.innerText = "Loading 15m history for both legs…";
+      historyStatus(pairKey, `Loading ${pair.target} / ${pair.bench} history…`
+        + (modelStates[pairKey] ? " Showing previously loaded history while refreshing." : ""));
       try {
         const [hs, hx] = await Promise.all([
-          fetchCandles(s.fullName, HISTORY_DAYS), fetchCandles(x.fullName, HISTORY_DAYS)
+          fetchCandles(s.fullName, HISTORY_DAYS, { priority: "foreground", force }),
+          fetchCandles(x.fullName, HISTORY_DAYS, { priority: "foreground", force })
         ]);
         const idxS = indexCandles(hs), idxX = indexCandles(hx);
         const archS = mergeArchive(pair.target, idxS.anchors);
@@ -2053,19 +2080,27 @@
         const m = buildModel(archS, archX, idxS, idxX, pair.lev, beta, pair.benchLev);
         m.idxS = idxS; m.idxX = idxX; m.pair = pair; m.lev = pair.lev;
         m.beta = beta; m.calibration = calibration; m.benchLev = pair.benchLev || 1;
+        m.loadedAt = Date.now();
         const dates = Object.keys(idxS.anchorMs).filter(d => idxX.anchorMs[d] != null && isTradingDay(d)).sort();
         m.todayAnchor = dates[dates.length - 1];
         if (!m.todayAnchor || m.clean.length < 3) {
-          note.innerText = `Not enough overlapping history yet (${m.clean.length} complete periods).`;
-          delete modelStates[pairKey];
+          historyStatus(pairKey, `Not enough overlapping history yet (${m.clean.length} complete periods).`
+            + (modelStates[pairKey] ? " Showing previously loaded history." : ""), true);
         } else {
           modelStates[pairKey] = m;
-          if (currentView === "model" && activePairKey === pairKey) renderModelView();
+          if (currentView === "model" && activePairKey === pairKey) {
+            renderModelView();
+            historyStatus(pairKey, "");
+          }
         }
       } catch (e) {
-        note.innerText = `History fetch failed: ${e}`;
+        historyStatus(pairKey, `History could not load: ${e.message || e}.`
+          + (modelStates[pairKey] ? " Showing previously loaded history." : ""), true);
       } finally {
         modelLoading[pairKey] = false;
+        if (currentView === "model" && activePairKey === pairKey) {
+          document.getElementById("mv-retry").disabled = false;
+        }
       }
     }
 
@@ -2077,6 +2112,7 @@
       // Redraw a cached pair immediately so switching back is not a blank frame; the refetch
       // then folds in any candles that closed since.
       if (modelStates[activePairKey]) renderModelView();
+      else resetModelView(PAIRS[activePairKey]);
       loadModelHistory(activePairKey);
     }
 
