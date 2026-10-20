@@ -92,6 +92,18 @@
     .stat { flex: 1 1 calc(33% - 8px); background: var(--surface); border: 1px solid var(--surface-card); border-radius: 8px; padding: 10px; }
     .stat-k { font-size: 9px; color: var(--text-dim); font-weight: 700; text-transform: uppercase; letter-spacing: .3px; }
     .stat-v { font-family: "Menlo", monospace; font-size: 15px; font-weight: 700; margin-top: 4px; }
+    .breakdown-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .breakdown-grid .stat { min-width: 0; padding: 10px 8px; }
+    .breakdown-grid .stat-v { font-size: 14px; overflow-wrap: anywhere; }
+    .breakdown-label { font-size: 10px; color: var(--text-dim); margin-top: 5px; line-height: 1.4; }
+    .breakdown-summary { font-size: 12px; line-height: 1.5; margin-top: 10px; }
+    .activity-row { display: flex; justify-content: space-between; gap: 16px; padding: 11px 0; border-bottom: 1px solid var(--surface-card); }
+    .activity-name { font-size: 12px; font-weight: 600; }
+    .activity-value { text-align: right; flex-shrink: 0; }
+    .activity-value strong { font: 700 15px "Menlo", monospace; }
+    .activity-high { color: var(--warn); }
+    .breakdown-help { margin-top: 12px; }
+    .breakdown-help summary { color: var(--accent); cursor: pointer; font-size: 11px; padding: 8px 0; }
     .chart-wrap { position: relative; }
     svg.chart { width: 100%; height: auto; display: block; touch-action: pan-y; }
     .chart-note { font-size: 10px; color: var(--text-dim); margin-top: 8px; line-height: 1.5; }
@@ -115,6 +127,16 @@
     table.dt td { text-align: right; padding: 4px 3px; color: #D1D1D6; border-bottom: 1px solid var(--surface-header); }
     table.dt th:first-child, table.dt td:first-child { text-align: left; }
 
+
+    .chart-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .chart-unit { position: relative; min-width: 100%; }
+    .hv-svg { margin-top: -2px; border-top: 1px solid #2C2C2E; }
+    .hv-bar { cursor: pointer; outline: none; }
+    .hv-sel { fill: #8E8E93; opacity: 0; }
+    .hv-bar:focus .hv-sel, .hv-bar.on .hv-sel { opacity: .25; }
+    .hv-band { position: absolute; top: 0; bottom: 0; background: #8E8E93; opacity: 0; pointer-events: none; transition: opacity .12s; }
+    .hv-band.on { opacity: .16; }
+    .hv-detail { font: 10px/1.5 "Menlo", monospace; color: var(--text); margin-top: 6px; min-height: 30px; }
     .detail-section { padding: 16px; border-bottom: 1px solid #1C1C1E; }
     .detail-title { font-size: 12px; font-weight: 700; color: var(--text-dim); margin-bottom: 12px; text-transform: uppercase; }
     
@@ -260,16 +282,58 @@
       <div class="chart-note" id="mv-live-status" role="status"></div>
     </div>
 
+    <div class="detail-section" aria-labelledby="mv-breakdown-title">
+      <div class="detail-title" id="mv-breakdown-title">What drove the move?</div>
+      <div class="breakdown-grid">
+        <div class="stat"><div class="stat-k">Asset move</div><div class="stat-v" id="mv-asset-move">–</div><div class="breakdown-label" id="mv-asset-label">–</div></div>
+        <div class="stat"><div class="stat-k">Model move</div><div class="stat-v" id="mv-model-move">–</div><div class="breakdown-label">Implied asset move</div></div>
+        <div class="stat"><div class="stat-k">Excess move</div><div class="stat-v" id="mv-excess-move">–</div><div class="breakdown-label">Percentage points</div></div>
+      </div>
+      <div class="breakdown-summary" id="mv-lead-summary">Waiting for verified 4 PM baselines.</div>
+      <div class="chart-note" id="mv-breakdown-note"></div>
+    </div>
+
+    <div class="detail-section" aria-labelledby="mv-activity-title">
+      <div class="detail-title" id="mv-activity-title">Activity since the 4 PM anchor</div>
+      <div class="activity-row">
+        <div><div class="activity-name" id="mv-volume-target-name">Asset</div><div class="breakdown-label" id="mv-volume-target-usd">Est. USD: waiting for history</div><div class="breakdown-label" id="mv-volume-target-detail">Waiting for history</div></div>
+        <div class="activity-value"><strong id="mv-volume-target">–</strong><div class="breakdown-label">vs usual volume</div></div>
+      </div>
+      <div class="activity-row">
+        <div><div class="activity-name" id="mv-volume-bench-name">Benchmark</div><div class="breakdown-label" id="mv-volume-bench-usd">Est. USD: waiting for history</div><div class="breakdown-label" id="mv-volume-bench-detail">Waiting for history</div></div>
+        <div class="activity-value"><strong id="mv-volume-bench">–</strong><div class="breakdown-label">vs usual volume</div></div>
+      </div>
+      <div class="breakdown-summary" id="mv-activity-summary">Volume needs completed candles, not live estimates.</div>
+      <div class="chart-note" id="mv-volume-window"></div>
+      <button type="button" class="history-retry" id="mv-volume-retry" onclick="loadModelHistory(activePairKey, true)" hidden>Retry volume</button>
+      <details class="breakdown-help"><summary>How to read this</summary>
+        <div class="chart-note">Price moves use the same exact 4 PM ET baseline as the desk. Model move is the benchmark return × β, adjusted for each instrument’s leverage. Excess move is asset minus model, in actual asset-price percentage points; Error now above remains leverage-adjusted.</div>
+        <div class="chart-note">Headline volume runs from the same exact 4 PM ET anchor through the latest completed 15-minute candle. Usual volume is the median over the same elapsed portion of comparable historical anchor periods; weekday, weekend, holiday and daylight-saving patterns must match. At least five complete historical periods are required. Hourly bars below the error path compare each hour with its own historical median; a partial hour uses only completed 15-minute portions on both sides. Hourly medians need not add up to the median cumulative total.</div>
+        <div class="chart-note">Volume is estimated USD notional: each candle’s traded base quantity × (high + low + close) ÷ 3. Historical expected volume uses each historical candle’s own price, not today’s price. This is an estimate of dollar turnover, not exact trade-by-trade notional. Each contract is compared with itself. 2× means twice usual USD activity; 0.5× means half. This is Hyperliquid venue volume, not total stock-market volume, net buying, or proof of which market moved first. Missing prices or candles are not treated as zero volume.</div>
+      </details>
+    </div>
+
     <div class="detail-section">
       <div class="detail-title">Error path since the 16:00 anchor</div>
-      <div class="chart-wrap" id="mv-cone-wrap">
-        <svg class="chart" id="mv-cone" viewBox="0 0 340 170" preserveAspectRatio="xMidYMid meet"></svg>
-        <div class="tip" id="mv-tip1"></div>
+      <div class="chart-scroll" id="mv-chart-scroll">
+        <div class="chart-unit" id="mv-chart-unit">
+          <div class="chart-wrap" id="mv-cone-wrap">
+            <svg class="chart" id="mv-cone" viewBox="0 0 340 170" preserveAspectRatio="xMidYMid meet"></svg>
+            <div class="tip" id="mv-tip1"></div>
+          </div>
+          <svg class="chart hv-svg" id="mv-vol-svg" viewBox="0 0 340 112" preserveAspectRatio="xMidYMid meet" role="group" aria-label="Hourly estimated USD volume, actual vs expected, on the same time axis as the error path"></svg>
+          <div class="hv-band" id="mv-hv-band"></div>
+        </div>
       </div>
       <div class="legend">
         <span><i style="background: #0A84FF"></i>today</span>
         <span><i style="background: #8E8E93; opacity: .45"></i>±1σ band, n=<span id="mv-cone-n">–</span></span>
+        <span><i style="background: #61A9BD"></i>actual volume</span>
+        <span><i style="background: #CED14E"></i>expected volume</span>
+        <span><i style="background: #61A9BD; opacity: .4"></i>partial hour</span>
       </div>
+      <div class="hv-detail" id="mv-hourly-detail" role="status" aria-live="polite">Select a volume hour for details.</div>
+      <div class="chart-note" id="mv-hourly-note">The volume lanes share the error path’s time axis; each has its own zero-based USD scale. Actual and expected are estimated USD: candle quantity × (high + low + close) ÷ 3. Only completed 15-minute portions are shown; partial hours are marked. Tap an hour to highlight the matching interval above. Hourly medians need not sum to the cumulative median.</div>
       <div class="chart-note" id="mv-cone-note">–</div>
     </div>
 
@@ -1747,7 +1811,9 @@
       const s0 = m.idxS.px.get(aMs), x0 = m.idxX.px.get(aMs);
       if (!(s0 > 0) || !(x0 > 0)) return pts;
       const lev = m.lev, beta = m.beta, benchLev = m.benchLev || 1;
-      for (let t = aMs; t <= Date.now(); t += CANDLE_MS) {
+      // Candle timestamps are opens, but their price is the close. Plot completed
+      // closes only; a forming candle must not appear ahead of the live point.
+      for (let t = aMs; t + CANDLE_MS <= Date.now(); t += CANDLE_MS) {
         const sp = m.idxS.px.get(t), xp = m.idxX.px.get(t);
         if (!(sp > 0) || !(xp > 0)) continue;
          pts.push({ k: Math.round((t - aMs) / CANDLE_MS),
@@ -1762,7 +1828,7 @@
           && hasVerifiedBaseline(s) && hasVerifiedBaseline(x)
           && aMs + CANDLE_MS === baselineCloseMs
           && Math.max(ageOf(s), ageOf(x)) <= STALE_WARN_MS) {
-         pts.push({ k: (Date.now() - aMs) / CANDLE_MS,
+         pts.push({ k: (Date.now() - aMs - CANDLE_MS) / CANDLE_MS,
                     e: ((s.livePrice / s0 - 1) / lev
                       - beta * (x.livePrice / x0 - 1) / benchLev) * 100, live: true });
       }
@@ -1879,12 +1945,322 @@
     // not discard the other's fetched history (or, worse, draw one pair's path on the other's
     // scales). `modelState()` is the accessor everything below reads.
     let modelStates = {}, modelLoading = {}, modelAnchorRetryAt = {};
+    const modelBreakdowns = {};
+    let hourlyVolumeRenderKey = null;
     const modelState = () => modelStates[activePairKey] || null;
+
+    function priceBreakdown(pair, target, benchmark, beta) {
+      if (!target || !benchmark || !hasVerifiedBaseline(target) || !hasVerifiedBaseline(benchmark)
+          || !(target.livePrice > 0) || !(benchmark.livePrice > 0)
+          || !Number.isFinite(target.livePrice) || !Number.isFinite(benchmark.livePrice)) return null;
+      const actual = (target.livePrice / target.closePrice - 1) * 100;
+      const bench = (benchmark.livePrice / benchmark.closePrice - 1) * 100;
+      const model = bench * beta * pair.lev / (pair.benchLev || 1);
+      return { actual, bench, model, excess: actual - model,
+        stale: connState !== "live" || Math.max(ageOf(target), ageOf(benchmark)) > STALE_WARN_MS };
+    }
+
+    function indexVolumeCandles(hist, now = Date.now(), observedAt = now) {
+      const volumes = new Map();
+      for (const candle of hist) {
+        const t = Number(candle.t), v = Number(candle.v);
+        if (candle.v == null || candle.v === "" || !Number.isFinite(t) || t % CANDLE_MS !== 0
+            || !Number.isFinite(v) || v < 0 || t + CANDLE_MS > Math.min(now, observedAt)) continue;
+        if (candle.T != null && Number(candle.T) !== t + CANDLE_MS - 1
+            && Number(candle.T) !== t + CANDLE_MS) continue;
+        // Candles expose base volume but not exact USD turnover. HLC3 is an explicit
+        // approximation; convert each historical candle at ITS price before taking
+        // medians so neither raw quantity nor today's price masquerades as past USD.
+        const h = Number(candle.h), l = Number(candle.l), c = Number(candle.c);
+        if (![h, l, c].every(p => Number.isFinite(p) && p > 0)
+            || h < l || c < l || c > h) continue;
+        const usd = v * ((h + l + c) / 3);
+        if (!Number.isFinite(usd)) continue;
+        volumes.set(t, usd);
+      }
+      return volumes;
+    }
+
+    function formatUsdVolume(value) {
+      if (!Number.isFinite(value)) return "–";
+      for (const [unit, size] of [["B", 1e9], ["M", 1e6], ["K", 1e3]]) {
+        if (value >= size) return `$${(value / size).toFixed(2)}${unit}`;
+      }
+      return `$${value.toFixed(2)}`;
+    }
+
+    // Compare like-for-like 4 PM anchor periods, not a rolling hour. Calendar shape
+    // and local endpoint matching prevent Friday→Monday being pooled with ordinary
+    // overnight periods, and avoid shifting an expected hour through a DST change.
+    function volumePeriodSignature(start, end) {
+      const a = nyParts(start), b = nyParts(end);
+      const dates = [], day = Date.parse(`${a.date}T12:00:00Z`);
+      for (let i = 0, n = dayGap(a.date, b.date); i <= n; i++) {
+        const d = new Date(day + i * 86400000).toISOString().slice(0, 10);
+        const dow = new Date(`${d}T12:00:00Z`).getUTCDay();
+        dates.push(dow === 0 || dow === 6 ? "weekend"
+          : NYSE_HOLIDAYS.has(d) ? "holiday" : NYSE_HALFDAYS.has(d) ? "half" : "weekday");
+      }
+      return `${dates.join(",")}|${b.hour}:${b.minute}`;
+    }
+
+    function relativeVolume(volumes, now = Date.now(), start = baselineCloseMs) {
+      const end = Math.floor(now / CANDLE_MS) * CANDLE_MS;
+      const empty = { start, end, current: null, typical: NaN, n: 0, ratio: NaN, hours: [],
+        reason: "Waiting for the first completed 15-minute candle after the 4 PM anchor" };
+      if (!Number.isFinite(start) || start % CANDLE_MS !== 0 || end <= start) return empty;
+      const sum = (a, b) => {
+        let sum = 0;
+        for (let t = a; t < b; t += CANDLE_MS) {
+          const v = volumes.get(t);
+          if (!Number.isFinite(v)) return null;
+          sum += v;
+        }
+        return sum;
+      };
+      const anchors = [];
+      for (const t of volumes.keys()) {
+        if (t >= start) continue;
+        const p = nyParts(t);
+        if (p.hour === 16 && p.minute === 0 && isTradingDay(p.date)) anchors.push(t);
+      }
+      const comparison = (from, to) => {
+        const duration = to - start, signature = volumePeriodSignature(start, to);
+        const samples = [];
+        for (const a of anchors) {
+          if (a + duration > start || volumePeriodSignature(a, a + duration) !== signature) continue;
+          const value = sum(a + from - start, a + duration);
+          if (value != null) samples.push(value);
+        }
+        samples.sort((a, b) => a - b);
+        const n = samples.length, mid = Math.floor(n / 2);
+        const median = n ? (n % 2 ? samples[mid] : (samples[mid - 1] + samples[mid]) / 2) : NaN;
+        const actual = sum(from, to);
+        return { actual, expected: n >= 5 ? median : NaN, n,
+          ratio: actual != null && n >= 5 && median > 0 ? actual / median : NaN };
+      };
+      const cumulative = comparison(start, end), hours = [];
+      for (let t = start; t < end; t += 4 * CANDLE_MS) {
+        const finish = Math.min(t + 4 * CANDLE_MS, end);
+        hours.push({ start: t, end: finish, ...comparison(t, finish),
+          partial: finish - t < 4 * CANDLE_MS, minutes: (finish - t) / 60000 });
+      }
+      return { start, end, current: cumulative.actual, typical: cumulative.expected,
+        n: cumulative.n, ratio: cumulative.ratio, hours,
+        reason: cumulative.actual == null ? "Missing candles since the anchor; total unavailable"
+          : cumulative.n < 5 ? `Only ${cumulative.n}/5 comparable historical periods`
+          : !(cumulative.expected > 0) ? "Usual volume is zero; no reliable ratio" : "" };
+    }
+
+    function saveBreakdownHistory(key, s, x, hs, hx) {
+      // A warm history cache can contain a candle captured while it was forming.
+      // Its scheduled end passing does not make that earlier volume snapshot final.
+      const observedAt = coin => historyCandles.cache.get(`${coin}|15m|${HISTORY_DAYS}`)?.fetchedAt ?? Date.now();
+      const state = {
+        s: indexVolumeCandles(hs, Date.now(), observedAt(s.fullName)),
+        x: indexVolumeCandles(hx, Date.now(), observedAt(x.fullName)),
+        targetCoin: s.fullName, benchCoin: x.fullName,
+        loadedAt: Date.now(),
+        checkedEnd: Math.floor(Date.now() / CANDLE_MS) * CANDLE_MS,
+        retryAt: Date.now() + 60000, refreshing: false, error: ""
+      };
+      modelBreakdowns[key] = state;
+      hourlyVolumeRenderKey = null;
+      return state;
+    }
+
+    async function refreshBreakdownVolume(key, state) {
+      if (state.refreshing || modelLoading[key] || Date.now() < state.retryAt) return;
+      const pair = PAIRS[key], s = marketMap[pair.target], x = marketMap[pair.bench];
+      if (!s || !x) return;
+      state.refreshing = true;
+      state.retryAt = Date.now() + 60000;
+      try {
+        const [hs, hx] = await Promise.all([
+          fetchCandles(s.fullName, HISTORY_DAYS, { priority: "foreground", force: true }),
+          fetchCandles(x.fullName, HISTORY_DAYS, { priority: "foreground", force: true })
+        ]);
+        if (marketMap[pair.target] !== s || marketMap[pair.bench] !== x
+            || modelBreakdowns[key] !== state) return;
+        saveBreakdownHistory(key, s, x, hs, hx);
+      } catch (e) {
+        state.error = `Volume refresh failed: ${e.message || e}. Use Retry history to try again.`;
+      } finally {
+        state.refreshing = false;
+        if (currentView === "model" && activePairKey === key) updateModelBreakdown();
+      }
+    }
+
+    function updateModelBreakdown() {
+      const pair = PAIRS[activePairKey];
+      if (!pair) return;
+      const target = marketMap[pair.target], benchmark = marketMap[pair.bench];
+      const m = modelState(), beta = m ? m.beta : effectiveBeta(pair);
+      const values = priceBreakdown(pair, target, benchmark, beta);
+      const text = (id, value) => { document.getElementById(id).innerText = value; };
+      text("mv-asset-label", pair.target);
+      for (const [id, value, suffix] of [
+        ["mv-asset-move", values?.actual, "%"], ["mv-model-move", values?.model, "%"],
+        ["mv-excess-move", values?.excess, " pp"]
+      ]) {
+        const el = document.getElementById(id);
+        el.innerText = Number.isFinite(value) ? `${sgn(value, 2)}${suffix}` : "–";
+        el.className = `stat-v ${!values || values.stale ? "neutral" : value > 0 ? "up" : value < 0 ? "down" : ""}`;
+      }
+      text("mv-lead-summary", !values ? "Waiting for both exact 4 PM baselines and prices."
+        : values.stale ? "Prices are stale or disconnected; relative-performance assessment paused."
+        : Math.abs(values.excess) < 0.005 ? `${pair.target} is tracking its model.`
+        : `${pair.target} is ${values.excess > 0 ? "ahead of" : "lagging"} its model by ${Math.abs(values.excess).toFixed(2)} percentage points.`);
+      text("mv-breakdown-note", values
+        ? `${pair.bench} ${sgn(values.bench, 2)}% × β ${trimNum(beta)}${pair.lev !== 1 || (pair.benchLev || 1) !== 1 ? ` × ${pair.lev}/${pair.benchLev || 1} leverage` : ""}. Since ${nyParts(baselineCloseMs).date} 4 PM ET.${pair.lev !== 1 ? ` Excess ÷ ${pair.lev} = leverage-adjusted error.` : ""}`
+        : "No previous-day or nearest-candle substitutes.");
+
+      text("mv-volume-target-name", `${pair.target}${target ? ` · ${target.dex}` : ""}`);
+      text("mv-volume-bench-name", `${pair.bench}${benchmark ? ` · ${benchmark.dex}` : ""}`);
+      const state = modelBreakdowns[activePairKey];
+      const valid = state && state.targetCoin === target?.fullName && state.benchCoin === benchmark?.fullName;
+      const end = Math.floor(Date.now() / CANDLE_MS) * CANDLE_MS;
+      // Volume only changes on completed 15m boundaries or a history refresh. Do not scan
+      // thousands of candles on every price tick, particularly on an iPhone.
+      if (valid && (state.summaryEnd !== end || state.summaryAnchor !== baselineCloseMs)) {
+        state.summaryEnd = end;
+        state.summaryAnchor = baselineCloseMs;
+        state.sv = relativeVolume(state.s);
+        state.xv = relativeVolume(state.x);
+      }
+      const sv = valid ? state.sv : null, xv = valid ? state.xv : null;
+      const retry = document.getElementById("mv-volume-retry");
+      retry.hidden = !valid || (!state.error && sv.current != null && xv.current != null);
+      retry.disabled = !!(state?.refreshing || modelLoading[activePairKey]);
+      for (const [suffix, v] of [["target", sv], ["bench", xv]]) {
+        const el = document.getElementById(`mv-volume-${suffix}`), ready = v && Number.isFinite(v.ratio);
+        el.innerText = ready ? `${v.ratio.toFixed(2)}×` : "–";
+        el.className = ready && v.ratio >= 1.5 ? "activity-high" : "";
+        text(`mv-volume-${suffix}-usd`, v
+          ? `Est. ${formatUsdVolume(v.current)} actual / ${formatUsdVolume(v.typical)} expected`
+          : "Est. USD: waiting for history");
+        text(`mv-volume-${suffix}-detail`, ready
+          ? `${Math.abs((v.ratio - 1) * 100).toFixed(0)}% ${v.ratio >= 1 ? "above" : "below"} usual · ${v.n} comparable periods`
+          : v ? v.reason : "Waiting for volume history");
+      }
+      const both = sv && xv && Number.isFinite(sv.ratio) && Number.isFinite(xv.ratio);
+      text("mv-activity-summary", !both ? "Not enough complete volume data for a two-market comparison."
+        : sv.ratio >= 1.5 && xv.ratio >= 1.5 ? "Activity is elevated in both markets."
+        : sv.ratio >= 1.5 ? `Unusually high activity in ${pair.target}, relative to its own usual volume.`
+        : xv.ratio >= 1.5 ? `Unusually high activity in ${pair.bench}, relative to its own usual volume.`
+        : "Neither market is at least 1.5× its usual activity.");
+      const formatter = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "America/New_York", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+      });
+      text("mv-volume-window", Number.isFinite(baselineCloseMs)
+        ? `Since anchor: ${formatter.format(new Date(baselineCloseMs))} → ${formatter.format(new Date(Math.max(baselineCloseMs, end)))} ET. Completed 15m candles only.${state?.error ? ` ${state.error}` : ""}`
+        : "Waiting for the exact 4 PM anchor.");
+      const renderKey = `${activePairKey}|${baselineCloseMs}|${end}|${valid ? state.loadedAt : "pending"}|${m?.maxStep || 0}|${m?.todayAnchor || ""}`;
+      if (hourlyVolumeRenderKey !== renderKey) {
+        hourlyVolumeRenderKey = renderKey;
+        renderHourlyVolume(sv, xv, pair, baselineCloseMs);
+      }
+      if (valid && end > baselineCloseMs && (end > state.checkedEnd || sv.current == null || xv.current == null)) {
+        refreshBreakdownVolume(activePairKey, state);
+      }
+    }
 
     function coneAt(cone, k) {
       let best = null;
       for (const p of cone) if (!best || Math.abs(p.k - k) < Math.abs(best.k - k)) best = p;
       return best;
+    }
+
+    function renderHourlyVolume(sv, xv, pair, anchor) {
+      const svg = document.getElementById("mv-vol-svg");
+      const unit = document.getElementById("mv-chart-unit");
+      const detail = document.getElementById("mv-hourly-detail");
+      const band = document.getElementById("mv-hv-band");
+      const STEP = 15 * 60 * 1000, W = 340, x0 = 34, x1 = W - 8, H = 112;
+      const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+      const abbr = v => !Number.isFinite(v) ? "n/a" : v === 0 ? "$0" : v >= 1e9 ? "$" + (v / 1e9).toFixed(v < 1e10 ? 2 : 1) + "B" : v >= 1e6 ? "$" + (v / 1e6).toFixed(v < 1e7 ? 2 : 1) + "M" : v >= 1e3 ? "$" + (v / 1e3).toFixed(v < 1e4 ? 1 : 0) + "K" : "$" + v.toFixed(0);
+      const full = v => Number.isFinite(v) ? "$" + v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "n/a";
+      const ny = (t, o) => new Date(t).toLocaleString("en-US", Object.assign({ timeZone: "America/New_York" }, o));
+      const lanes = [[sv, pair && pair.target, "Asset"], [xv, pair && pair.bench, "Benchmark"]];
+      const have = lanes.map(l => l[0] && Array.isArray(l[0].hours) ? l[0].hours : []);
+      const any = have[0].length + have[1].length > 0;
+      if (band && typeof band.classList?.remove === "function") band.classList.remove("on");
+      // Shared horizon: the error path's maxStep when it belongs to this pair, else elapsed extent, min 24h.
+      let m = null;
+      try { m = typeof modelState === "function" ? modelState() : null; } catch (e) { m = null; }
+      const aligned = m && m.pair && pair && m.pair.target === pair.target && m.pair.bench === pair.bench
+        && m.idxS?.anchorMs[m.todayAnchor] + STEP === anchor
+        && m.idxX?.anchorMs[m.todayAnchor] + STEP === anchor && m.maxStep > 0;
+      const coneSvg = document.getElementById("mv-cone");
+      if (coneSvg?.style) coneSvg.style.visibility = aligned ? "visible" : "hidden";
+      let step = aligned ? m.maxStep : 0;
+      const origin = Number.isFinite(anchor) ? anchor : (any ? Math.min(...have.flat().map(h => h.start)) : 0);
+      if (!step) {
+        let lastEnd = origin;
+        have.flat().forEach(h => { if (h.end > lastEnd) lastEnd = h.end; });
+        step = Math.max(96, Math.ceil((lastEnd - origin) / STEP));
+      }
+      if (unit && unit.style) unit.style.minWidth = step <= 96 ? "100%" : Math.round(340 * step / 192) + "px";
+      if (detail) detail.innerHTML = "Select a volume hour for details.";
+      if (!svg) return;
+      const X = k => x0 + (x1 - x0) * Math.max(0, Math.min(k, step)) / step;
+      let out = "";
+      const tick = step > 120 ? 48 : 24;
+      for (let k = 0; k <= step; k += tick) out += '<line class="grid-line" x1="' + X(k).toFixed(1) + '" x2="' + X(k).toFixed(1) + '" y1="4" y2="' + (H - 2) + '"/>';
+      if (!any || !Number.isFinite(anchor)) {
+        svg.innerHTML = out + '<text class="ax" x="' + x0 + '" y="' + (H / 2) + '">' + (!sv && !xv ? "Waiting for volume history." : Number.isFinite(anchor) ? "Waiting for first completed 15-minute candle." : "Waiting for the 4 PM anchor.") + "</text>";
+        return;
+      }
+      lanes.forEach(([mk, label, fallback], li) => {
+        const hrs = have[li], name = label || fallback;
+        const yT = 14 + li * 58, yB = yT + 34;
+        let max = 0;
+        hrs.forEach(h => { if (Number.isFinite(h.actual)) max = Math.max(max, h.actual); if (Number.isFinite(h.expected)) max = Math.max(max, h.expected); });
+        const Y = v => yB - (yB - yT) * v / (max || 1);
+        out += '<text class="ax" x="' + x0 + '" y="' + (yT - 4) + '">' + esc(name) + " est. USD / h</text>" +
+          '<line class="grid-line" x1="' + x0 + '" x2="' + x1 + '" y1="' + yT + '" y2="' + yT + '"/>' +
+          '<line class="zero-line" x1="' + x0 + '" x2="' + x1 + '" y1="' + yB + '" y2="' + yB + '"/>' +
+          '<text class="ax" x="' + (x0 - 4) + '" y="' + (yT + 3) + '" text-anchor="end">' + (max ? abbr(max) : "") + "</text>" +
+          '<text class="ax" x="' + (x0 - 4) + '" y="' + (yB + 3) + '" text-anchor="end">$0</text>';
+        hrs.forEach(h => {
+          const ka = (h.start - anchor) / STEP, kb = (h.end - anchor) / STEP;
+          if (!(kb > 0) || ka >= step) return;
+          const xa = X(ka), xb = X(Math.max(kb, ka + 1)), w = Math.max(1, xb - xa);
+          const gap = Math.min(1, w * .12), bw = Math.max(1, (w - gap * 2) / 2);
+          const hasA = Number.isFinite(h.actual), hasE = Number.isFinite(h.expected);
+          const op = h.partial ? ".45" : "1";
+          const bar = (v, x, c) => Number.isFinite(v) ? '<rect x="' + x.toFixed(2) + '" y="' + Y(v).toFixed(1) + '" width="' + bw.toFixed(2) + '" height="' + Math.max(v > 0 ? 1 : 0, yB - Y(v)).toFixed(1) + '" fill="' + c + '" opacity="' + op + '"/>' : "";
+          const win = ny(h.start, { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false }) + "-" + ny(h.end, { hour: "2-digit", minute: "2-digit", hour12: false }) + " ET";
+          const lines = [
+            name + " " + win + (h.partial ? " (partial, " + h.minutes + " of 60 min)" : ""),
+            "actual " + full(hasA ? h.actual : NaN) + " | expected " + (hasE ? full(h.expected) : "n/a (needs 5+ periods)"),
+            "ratio " + (Number.isFinite(h.ratio) ? h.ratio.toFixed(2) + "x" : "n/a") + " | n=" + (h.n | 0) + " | est. USD"
+          ];
+          const det = lines.map(esc).join("<br>");
+          out += '<g class="hv-bar" tabindex="0" role="button" data-det="' + esc(det) + '" data-xa="' + xa.toFixed(2) + '" data-xb="' + xb.toFixed(2) + '" aria-label="' + esc(lines.join(", ")) + '">' +
+            '<rect class="hv-sel" x="' + xa.toFixed(2) + '" y="' + (yT - 2) + '" width="' + w.toFixed(2) + '" height="' + (yB - yT + 4) + '"/>' +
+            bar(h.actual, xa + gap, "#61A9BD") + bar(h.expected, xa + gap + bw, "#CED14E") + "</g>";
+        });
+      });
+      svg.innerHTML = out;
+      if (typeof svg.querySelectorAll !== "function") return;
+      svg.querySelectorAll(".hv-bar").forEach(el => {
+        const pick = () => {
+          svg.querySelectorAll(".hv-bar.on").forEach(o => o.classList.remove("on"));
+          el.classList.add("on");
+          if (detail) detail.innerHTML = el.getAttribute("data-det");
+          if (band && band.style && band.classList) {
+            const xa = Number(el.getAttribute("data-xa")), xb = Number(el.getAttribute("data-xb"));
+            band.style.left = (xa / W * 100).toFixed(3) + "%";
+            band.style.width = ((xb - xa) / W * 100).toFixed(3) + "%";
+            band.classList.add("on");
+          }
+        };
+        if (typeof el.addEventListener !== "function") return;
+        el.addEventListener("click", pick);
+        el.addEventListener("focus", pick);
+        el.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+      });
     }
 
     function renderModelView() {
@@ -2015,6 +2391,7 @@
 
     // Only the live tip of today's path moves between renders, so just move it.
     function updateModelLive() {
+      updateModelBreakdown();
       const m = modelState();
       if (!m || !m.scale) return;
       const target = marketMap[m.pair.target], benchmark = marketMap[m.pair.bench];
@@ -2210,6 +2587,7 @@
       for (const id of ["mv-tip1", "mv-tip2"]) document.getElementById(id).style.opacity = 0;
       document.getElementById("mv-table").style.display = "none";
       document.getElementById("mv-tbl-toggle").innerText = "Show data table ›";
+      updateModelBreakdown();
     }
 
     async function loadModelHistory(pairKey, force = false) {
@@ -2236,6 +2614,8 @@
           fetchCandles(s.fullName, HISTORY_DAYS, { priority: "foreground", force }),
           fetchCandles(x.fullName, HISTORY_DAYS, { priority: "foreground", force })
         ]);
+        saveBreakdownHistory(pairKey, s, x, hs, hx);
+        if (currentView === "model" && activePairKey === pairKey) updateModelBreakdown();
         const idxS = indexCandles(hs), idxX = indexCandles(hx);
         const archS = mergeArchive(pair.target, idxS.anchors);
         const archX = mergeArchive(pair.bench, idxX.anchors);
