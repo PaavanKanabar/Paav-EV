@@ -151,6 +151,35 @@
     .basis-sub { font-size: 12px; color: #D1D1D6; margin-bottom: 4px; }
     .basis-divider { margin: 12px 0; border-top: 1px solid #333; }
     
+    /* pinned symbols + list anchor */
+    .list-controls { padding: 8px 16px 10px; background: var(--bg); border-bottom: 1px solid #2C2C2E; }
+    .anchor-label { font-size: 10px; font-weight: 700; color: var(--text-dim); letter-spacing: .3px; text-transform: uppercase; margin-bottom: 6px; }
+    .anchor-group { display: flex; gap: 6px; overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; scrollbar-width: none; overscroll-behavior-x: contain; padding-bottom: 2px; }
+    .anchor-group::-webkit-scrollbar { display: none; }
+    .anchor-btn { flex: none; min-height: 36px; padding: 0 12px; background: var(--surface); color: var(--text-dim); border: 1px solid var(--surface-card); border-radius: 6px; font: 600 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; cursor: pointer; transition: background .15s, color .15s, border-color .15s, transform .1s; }
+    .anchor-btn:active { transform: scale(.96); }
+    .anchor-btn[aria-pressed="true"] { color: var(--text); background: var(--surface-header); border-color: var(--accent); }
+    .anchor-btn:focus-visible, .pin-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .anchor-note { font-size: 10px; color: var(--text-dim); margin-top: 6px; line-height: 1.4; }
+    #list-anchor-status { font-size: 11px; color: var(--text-dim); margin-top: 6px; line-height: 1.4; overflow-wrap: anywhere; white-space: normal; }
+    #list-anchor-status:empty { display: none; }
+    #list-anchor-retry { margin-top: 6px; min-height: 36px; padding: 0 12px; }
+    #list-anchor-retry[hidden] { display: none; }
+    .pinned-section { border-bottom: 1px solid #333; }
+    .pinned-heading { background: var(--surface-header); padding: 10px 16px; font-size: 13px; font-weight: 700; color: #E5E5EA; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .pinned-empty { padding: 12px 16px; font-size: 12px; color: var(--text-dim); line-height: 1.5; border-bottom: 1px solid #1C1C1E; }
+    .pinned-meta { padding: 8px 16px; font-size: 11px; color: var(--warn); line-height: 1.4; overflow-wrap: anywhere; }
+    .pinned-meta:empty { display: none; }
+    .ticker-top { display: flex; align-items: center; gap: 2px; min-width: 0; }
+    .ticker-top .ticker-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pin-button { flex: none; position: relative; width: 28px; height: 28px; margin: -6px 0 -6px -2px; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: 0; border-radius: 6px; color: var(--text-dim); cursor: pointer; -webkit-tap-highlight-color: transparent; transition: color .15s, transform .12s; }
+    .pin-button::after { content: ""; position: absolute; inset: -8px -6px; }
+    .pin-button svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; pointer-events: none; }
+    .pin-button[aria-pressed="true"] { color: var(--accent); }
+    .pin-button[aria-pressed="true"] svg { fill: currentColor; }
+    .pin-button:active { transform: scale(.85); }
+    @media (prefers-reduced-motion: reduce) { .anchor-btn, .pin-button { transition: none; } }
+
     .imbalance-container { display: flex; height: 8px; width: 100%; border-radius: 4px; overflow: hidden; margin-top: 8px; background: #333; }
     .imb-bid { background: var(--up); height: 100%; transition: width 0.2s ease-out; }
     .imb-ask { background: var(--down); height: 100%; transition: width 0.2s ease-out; }
@@ -170,6 +199,22 @@
     </div>
     <div id="loading" role="status" aria-live="polite">Connecting to market data…</div>
     <button class="history-retry" id="startup-retry" onclick="retryStartup()" hidden>Retry unavailable data</button>
+    <div class="list-controls">
+      <div class="anchor-label" id="list-anchor-label">List baseline</div>
+      <div class="anchor-group" role="group" aria-label="List baseline anchor">
+        <button type="button" class="anchor-btn" data-list-anchor="close" aria-pressed="true" onclick="selectListAnchor('close')">US close</button>
+        <button type="button" class="anchor-btn" data-list-anchor="hour" aria-pressed="false" onclick="selectListAnchor('hour')">1h</button>
+        <button type="button" class="anchor-btn" data-list-anchor="eu" aria-pressed="false" onclick="selectListAnchor('eu')">EU open</button>
+        <button type="button" class="anchor-btn" data-list-anchor="us" aria-pressed="false" onclick="selectListAnchor('us')">US open</button>
+        <button type="button" class="anchor-btn" data-list-anchor="two" aria-pressed="false" onclick="selectListAnchor('two')">2d</button>
+        <button type="button" class="anchor-btn" data-list-anchor="week" aria-pressed="false" onclick="selectListAnchor('week')">1 week</button>
+      </div>
+      <div class="anchor-note">List only · Details and history stay on US close.</div>
+      <details class="anchor-note"><summary>How these returns work</summary>US close is the default on every opening. EU open uses the latest 08:00 London trading day; US open uses the latest 09:30 New York trading day. The 1h baseline rolls each completed minute. 2d and 1 week select 2 and 5 US closes before the latest completed US close. Exact times appear below. Across multiple sessions, leveraged returns are de-levered separately at each US close and then compounded; the model compounds each segment with its current beta. Missing exact prices stay blank.</details>
+      <div id="list-anchor-status" role="status" aria-live="polite"></div>
+      <button type="button" class="history-retry" id="list-anchor-retry" onclick="loadListAnchors(true)" hidden>Retry baselines</button>
+    </div>
+    <div id="pinned-content"></div>
     <div id="content"></div>
   </div>
 
@@ -756,6 +801,336 @@
       [p.target, p.bench, ...p.macro, ...p.heavies].forEach(t => activeKeys.add(t.toUpperCase()));
     }
 
+    // List-only state is deliberately separate from the 4 PM model/history state.
+    const listKeys = [...new Set(taxonomy.flatMap(s => s.subgroups.flatMap(g => g.tickers)))];
+    const PIN_KEY = "hl_pinned_symbols_v1", LIST_CACHE_KEY = "hl_list_anchor_points_v1";
+    let pinStorageNotice = "", pinnedSymbols = ["SOXL", "XYZ100"];
+    try {
+      const saved = localStorage.getItem(PIN_KEY);
+      if (saved !== null) {
+        const parsed = JSON.parse(saved);
+        if (!Array.isArray(parsed)) throw new Error("Invalid saved pins");
+        pinnedSymbols = [...new Set(parsed.filter(k => typeof k === "string" && listKeys.includes(k)))];
+      }
+    } catch (_) { pinStorageNotice = "Saved pins could not be read. Changes may not persist on this browser."; }
+    let listAnchorMode = "close", listAnchorSpec = null, listAnchorState = null;
+    let listCacheLoaded = false, listCacheSaveTimer = null;
+    const listPointCache = new Map(), listPointFlights = new Map(), listSpecMemo = new Map();
+    let listRequestActive = 0, listCooldownUntil = 0;
+    const listRequestWaiters = [], listResetKeys = new Set();
+    for(const key of listKeys) {
+      const p=PAIRS[key];
+      if(!p) continue;
+      if((p.lev||1)>1) listResetKeys.add(p.target);
+      listResetKeys.add(p.bench);
+    }
+    const LIST_STEPS = { "1m": 60000, "15m": CANDLE_MS, "30m": 1800000, "1h": 3600000 };
+    const LONDON_HOLIDAYS = new Set([
+      "2026-01-01", "2026-04-03", "2026-04-06", "2026-05-04", "2026-05-25",
+      "2026-08-31", "2026-12-25", "2026-12-28",
+      "2027-01-01", "2027-03-26", "2027-03-29", "2027-05-03", "2027-05-31",
+      "2027-08-30", "2027-12-27", "2027-12-28"
+    ]);
+
+    function pinButtonHtml(key, prefix = "") {
+      const pinned = pinnedSymbols.includes(key);
+      return `<button type="button" class="pin-button" id="${prefix}pin-${key}" aria-label="${pinned ? "Unpin" : "Pin"} ${key}" aria-pressed="${pinned}" onclick="togglePinnedSymbol('${key}', event, '${prefix}')"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m15 3 6 6-3 1-4 4-1 4-3-3-6 6 6-6-3-3 4-1 4-4z"/></svg></button>`;
+    }
+
+    function togglePinnedSymbol(key, event, prefix = "") {
+      event?.preventDefault();
+      event?.stopPropagation();
+      if (!listKeys.includes(key)) return;
+      pinnedSymbols = pinnedSymbols.includes(key) ? pinnedSymbols.filter(k => k !== key) : [...pinnedSymbols, key];
+      try { localStorage.setItem(PIN_KEY, JSON.stringify(pinnedSymbols)); pinStorageNotice = ""; }
+      catch (_) { pinStorageNotice = "Pins work for this visit, but browser storage could not save them."; }
+      renderDashboard();
+      const focus = document.getElementById(`${prefix}pin-${key}`) || document.getElementById(`pin-${key}`);
+      focus?.focus?.({ preventScroll: true });
+    }
+
+    function dashboardRowHtml(item, prefix = "") {
+      const key = item.baseName.toUpperCase(), pair = !!PAIRS[key];
+      const clickable = pair && !item.placeholder && marketDiscoveryComplete;
+      // A button must not be nested inside a link; non-modelled symbols have their own link.
+      const ticker = !pair && !item.placeholder
+        ? `<a href="https://app.hyperliquid.xyz/trade/${item.fullName}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">${key}</a>`
+        : `${key}${clickable ? ' <span style="color:var(--accent)">›</span>' : ""}`;
+      return `<div class="row"${clickable ? ` onclick="openDetail('${key}', event)"` : ""}>
+        <div class="ticker"><div class="ticker-top"><span class="ticker-name">${ticker}</span>${pinButtonHtml(key, prefix)}</div>
+        <span class="ticker-vol">${item.placeholder ? (marketDiscoveryComplete ? "market unavailable" : "loading market…")
+          : `${item.dex} · ${formatVolume(item.volume)} 24h · <span id="${prefix}age-${key}">–</span>`}</span></div>
+        <div class="price" id="${prefix}px-${key}">–</div><div class="ret" id="${prefix}ret-${key}">–</div><div class="outperf" id="${prefix}outperf-${key}">–</div></div>`;
+    }
+
+    function listColumnsHtml(title) {
+      return `<div class="group-header"><div class="group-title">${title}</div><div class="col">PRICE</div><div class="col">1x RET</div><div class="col">OUTPERF</div></div>`;
+    }
+
+    function renderPinnedSymbols() {
+      const root = document.getElementById("pinned-content");
+      if (!root) return;
+      root.innerHTML = `<section class="pinned-section" aria-label="Pinned symbols"><div class="pinned-heading">PINNED <span>Saved on this browser</span></div>
+        <div class="pinned-meta" role="status">${pinStorageNotice}</div>${pinnedSymbols.length
+          ? listColumnsHtml("YOUR SYMBOLS") + pinnedSymbols.map(key => dashboardRowHtml(marketMap[key] || {baseName:key, placeholder:true}, "pin-")).join("")
+          : '<div class="pinned-empty">Pin a ticker below to keep it here.</div>'}</section>`;
+    }
+
+    function zonedParts(ms, zone) {
+      const parts = {};
+      for (const p of new Intl.DateTimeFormat("en-CA", {
+        timeZone: zone, year:"numeric", month:"2-digit", day:"2-digit",
+        hour:"2-digit", minute:"2-digit", hourCycle:"h23"
+      }).formatToParts(new Date(ms))) parts[p.type] = p.value;
+      return {date:`${parts.year}-${parts.month}-${parts.day}`, hour:+parts.hour, minute:+parts.minute};
+    }
+
+    function zonedClockMs(date, hour, minute, zone) {
+      const [y,m,d] = date.split("-").map(Number), wanted = Date.UTC(y,m-1,d,hour,minute);
+      let guess = wanted;
+      for (let i=0; i<3; i++) {
+        const p = zonedParts(guess, zone), [py,pm,pd] = p.date.split("-").map(Number);
+        guess += wanted - Date.UTC(py,pm-1,pd,p.hour,p.minute);
+      }
+      return guess;
+    }
+
+    function lastOpeningMs(now, zone, hour, minute, london = false) {
+      const date = zonedParts(now, zone).date, day = Date.parse(date + "T00:00:00Z");
+      for (let i=0; i<20; i++) {
+        const d = new Date(day-i*86400000), key = d.toISOString().slice(0,10);
+        const openDay = london ? d.getUTCDay()>0 && d.getUTCDay()<6 && !LONDON_HOLIDAYS.has(key) : isTradingDay(key);
+        if (!openDay) continue;
+        const ms = zonedClockMs(key,hour,minute,zone);
+        if (ms<=now) return ms;
+      }
+      throw new Error("No completed market opening found");
+    }
+
+    function getListAnchorSpec(mode = listAnchorMode, now = Date.now()) {
+      const memoKey=`${mode}|${Math.floor(now/60000)}`;
+      if(listSpecMemo.has(memoKey)) return listSpecMemo.get(memoKey);
+      const latest = getLastUSCloseMs(now);
+      let ms = latest, label = "US close";
+      if (mode === "hour") { ms = Math.floor(now/60000)*60000-3600000; label = "1h"; }
+      if (mode === "eu") { ms = lastOpeningMs(now,"Europe/London",8,0,true); label = "EU open"; }
+      if (mode === "us") { ms = lastOpeningMs(now,"America/New_York",9,30); label = "US open"; }
+      if (mode === "two" || mode === "week") {
+        for (let i=0; i<(mode==="two"?2:5); i++) ms = getLastUSCloseMs(ms-1);
+        label = mode==="two" ? "2d" : "1 week";
+      }
+      const cuts = [];
+      if (mode !== "close") {
+        const start = Date.parse(nyParts(ms).date+"T00:00:00Z"), end = Date.parse(nyParts(now).date+"T00:00:00Z");
+        for (let day=start; day<=end; day+=86400000) {
+          const date = new Date(day).toISOString().slice(0,10);
+          if (!isTradingDay(date)) continue;
+          const close = zonedClockMs(date,NYSE_HALFDAYS.has(date)?13:16,0,"America/New_York");
+          if (close>ms && close<=now) cuts.push(close);
+        }
+      }
+      const format = zone=>new Intl.DateTimeFormat("en-GB",{timeZone:zone,day:"numeric",month:"short",hour:"2-digit",minute:"2-digit",timeZoneName:"short"}).format(new Date(ms));
+      const spec={mode, ms, label, cuts, display:`London ${format("Europe/London")} / NY ${format("America/New_York")}`,key:`${mode}|${ms}|${cuts.join(",")}`};
+      if(listSpecMemo.size>12) listSpecMemo.clear();
+      listSpecMemo.set(memoKey,spec);
+      return spec;
+    }
+
+    function loadListPointCache() {
+      if (listCacheLoaded) return;
+      listCacheLoaded = true;
+      try {
+        const saved = JSON.parse(localStorage.getItem(LIST_CACHE_KEY) || "[]");
+        if (!Array.isArray(saved)) return;
+        for (const p of saved.slice(-1200)) {
+          const step = LIST_STEPS[p?.interval];
+          if (typeof p?.coin === "string" && step && Number.isFinite(p.closeMs) && p.closeMs<=Date.now()
+              && p.closeMs>Date.now()-15*86400000 && p.openMs===p.closeMs-step
+              && p.openMs%step===0 && Number.isFinite(p.px) && p.px>0 && p.src==="snap") {
+            listPointCache.set(`${p.coin}|${p.closeMs}`,p);
+          }
+        }
+      } catch (error) { console.warn("List anchor cache unavailable; exact prices will be fetched.",error); }
+    }
+
+    function cacheListPoint(point) {
+      listPointCache.set(`${point.coin}|${point.closeMs}`,point);
+      if (listCacheSaveTimer !== null) return;
+      listCacheSaveTimer = setTimeout(() => {
+        listCacheSaveTimer = null;
+        const points = [...listPointCache.values()].filter(p=>p.closeMs>Date.now()-15*86400000).sort((a,b)=>a.closeMs-b.closeMs).slice(-1200);
+        listPointCache.clear();
+        points.forEach(p=>listPointCache.set(`${p.coin}|${p.closeMs}`,p));
+        try { localStorage.setItem(LIST_CACHE_KEY,JSON.stringify(points)); }
+        catch (error) { console.warn("Could not save list anchor cache.",error); }
+      },300);
+    }
+
+    function listPoint(item, ms) {
+      if (!item) return NaN;
+      if (ms === baselineCloseMs && hasVerifiedBaseline(item)) return item.closePrice;
+      return listPointCache.get(`${item.fullName}|${ms}`)?.px ?? NaN;
+    }
+
+    function listAssets() {
+      const keys = new Set(listKeys);
+      listKeys.forEach(key=>{ if(PAIRS[key]) keys.add(PAIRS[key].bench); });
+      return [...new Set([...keys].map(k=>marketMap[k]).filter(Boolean))];
+    }
+
+    function listNeedsResets(symbol) {
+      return listResetKeys.has(symbol);
+    }
+
+    function listNeededTimes(item, spec) {
+      return listNeedsResets(item.baseName.toUpperCase()) ? [spec.ms,...spec.cuts] : [spec.ms];
+    }
+
+    function listLegReturn(item, spec, leverage = 1, multiplier = 1) {
+      if (!item || !(item.livePrice>0) || !Number.isFinite(item.livePrice)) return NaN;
+      const times = leverage===1 && multiplier===1 ? [spec.ms] : [spec.ms,...spec.cuts];
+      const points = times.map(t=>listPoint(item,t));
+      if (points.some(p=>!Number.isFinite(p) || p<=0)) return NaN;
+      points.push(item.livePrice);
+      let wealth=1;
+      for (let i=1;i<points.length;i++) wealth *= 1+multiplier*(points[i]/points[i-1]-1)/leverage;
+      return (wealth-1)*100;
+    }
+
+    function listComparison(item) {
+      const pair=PAIRS[item.baseName.toUpperCase()], bench=pair && marketMap[pair.bench];
+      if (listAnchorMode==="close") {
+        const ret=item.rawPct/(pair?.lev||1);
+        return {ret, out:pair ? ret-effectiveBeta(pair)*(bench?.rawPct??NaN)/(pair.benchLev||1) : null, bench};
+      }
+      if (!listAnchorSpec) return {ret:NaN,out:pair?NaN:null,bench};
+      const ret=listLegReturn(item,listAnchorSpec,pair?.lev||1);
+      const model=pair ? listLegReturn(bench,listAnchorSpec,pair.benchLev||1,effectiveBeta(pair)) : NaN;
+      return {ret,out:pair?ret-model:null,bench};
+    }
+
+    function paintListRow(item, values, prefix) {
+      const px=item[`el${prefix}Px`], ret=item[`el${prefix}Ret`], out=item[`el${prefix}Outperf`], ageEl=item[`el${prefix}Age`];
+      if(!px || !ret) return;
+      const age=ageOf(item), dead=age>STALE_BAD_MS, benchDead=values.bench && ageOf(values.bench)>STALE_BAD_MS;
+      const price=Number.isFinite(item.livePrice) && item.livePrice>0 ? `$${fmtPx(item.livePrice)}` : "–";
+      if(px.innerText!==price) px.innerText=price;
+      if(ageEl) {
+        const text=fmtAge(age), cls=ageClass(age);
+        if(ageEl.innerText!==text) ageEl.innerText=text;
+        if(ageEl.className!==cls) ageEl.className=cls;
+      }
+      for(const [node, value, cls, stale] of [[ret,values.ret,"ret",dead],[out,values.out,"outperf",dead||benchDead]]) {
+        if(!node) continue;
+        const valid=Number.isFinite(value), text=valid?`${value>=0?"+":""}${value.toFixed(2)}%`:"–";
+        const color=!valid||stale?"neutral":value>=0?"up":"down";
+        if(node.innerText!==text) node.innerText=text;
+        if(node.className!==`${cls} ${color}`) node.className=`${cls} ${color}`;
+      }
+    }
+
+    function renderListAnchorStatus() {
+      const status=document.getElementById("list-anchor-status"), retry=document.getElementById("list-anchor-retry");
+      for (const button of document.querySelectorAll?.("[data-list-anchor]") || []) {
+        button.setAttribute("aria-pressed",String(button.dataset.listAnchor===listAnchorMode));
+      }
+      if (!status) return;
+      const spec=listAnchorMode==="close" ? getListAnchorSpec("close") : listAnchorSpec;
+      if (!spec) return;
+      const unavailable=listAnchorMode==="close" ? 0 : listAssets().filter(item=>listNeededTimes(item,spec).some(t=>!Number.isFinite(listPoint(item,t)))).length;
+      const loading=listAnchorState?.loading;
+      const note=spec.mode==="hour" ? " Rolling 1h baseline, refreshed each completed minute." :
+        spec.mode==="two"||spec.mode==="week" ? ` ${spec.mode==="two"?2:5} closes before the latest US close.` : "";
+      const message=`Since ${spec.display}.${note}`
+        +(unavailable ? ` ${unavailable} markets ${loading?"loading exact anchors":"unavailable; affected comparisons stay blank"}.` : "")
+        +(listAnchorMode!=="close" && Date.now()<listCooldownUntil
+          ? ` Market-data cooldown: ${Math.ceil((listCooldownUntil-Date.now())/1000)}s; retrying automatically.`
+          : listAnchorState?.error && listAnchorMode!=="close" ? ` ${listAnchorState.error}` : "");
+      if (status.innerText!==message) status.innerText=message;
+      status.title="List-only. 1x returns are compounded after de-levering each US-close segment; the model compounds each segment using the current beta. Details and history always retain their US-close anchor.";
+      if (retry) { retry.hidden=listAnchorMode==="close" || !unavailable || !!loading || !marketDiscoveryComplete; retry.disabled=!!loading; }
+    }
+
+    function selectListAnchor(mode) {
+      if (!["close","hour","eu","us","two","week"].includes(mode)) return;
+      listAnchorMode=mode;
+      listAnchorSpec=null;
+      listAnchorState=null;
+      if(mode!=="close") loadListPointCache();
+      isDirty=true;
+      flushUpdatesToDOM();
+    }
+
+    function ensureListAnchor() {
+      if (listAnchorMode==="close") { listAnchorSpec=null; return; }
+      const spec=getListAnchorSpec();
+      if (listAnchorSpec?.key!==spec.key) { listAnchorSpec=spec; listAnchorState=null; }
+      if (currentView==="main" && !document.hidden && marketDiscoveryComplete && !baselinePromise
+          && !listAnchorState?.loading && Date.now()>=(listAnchorState?.retryAt||0)) loadListAnchors();
+    }
+
+    async function fetchListPoints(item, times) {
+      const interval=times.length>1 ? (["1h","30m","15m","1m"].find(k=>times.every(t=>t%LIST_STEPS[k]===0))) : (listAnchorMode==="hour"?"1m":"15m");
+      const step=LIST_STEPS[interval], min=Math.min(...times), max=Math.max(...times);
+      const flightKey=`${item.fullName}|${interval}|${min}|${max}`;
+      if (listPointFlights.has(flightKey)) return listPointFlights.get(flightKey);
+      const job=(async()=>{
+        await sleep(Math.max(0,max+2000-Date.now()));
+        if(Date.now()<listCooldownUntil) throw new Error("List anchor cooldown");
+        // Global cap survives rapid anchor changes, not just a single selection's queue.
+        if(listRequestActive>=3) await new Promise(resolve=>listRequestWaiters.push(resolve));
+        else listRequestActive++;
+        let candles;
+        try {
+          if(Date.now()<listCooldownUntil) throw new Error("List anchor cooldown");
+          candles=await requestInfo({type:"candleSnapshot",req:{coin:item.fullName,interval,startTime:min-step,endTime:max}});
+        } catch(error) {
+          if(error.message.includes("HTTP 429")) listCooldownUntil=Math.max(listCooldownUntil,Date.now()+60000);
+          throw error;
+        }
+        finally {
+          const next=listRequestWaiters.shift();
+          if(next) next(); else listRequestActive--;
+        }
+        if (!Array.isArray(candles)) throw new Error(`${item.baseName}: invalid candle response`);
+        for (const ms of times) {
+          const c=candles.find(c=>Number(c?.t)===ms-step && (c.s==null||c.s===item.fullName)
+            && Number.isFinite(Number(c.c)) && Number(c.c)>0
+            && c.T!=null && [ms-1,ms].includes(Number(c.T)));
+          if (c) cacheListPoint({coin:item.fullName,closeMs:ms,openMs:ms-step,px:Number(c.c),interval,src:"snap"});
+        }
+        if (times.some(t=>!Number.isFinite(listPoint(item,t)))) throw new Error(`${item.baseName}: exact anchor candle missing`);
+      })();
+      listPointFlights.set(flightKey,job);
+      try { return await job; } finally { listPointFlights.delete(flightKey); }
+    }
+
+    async function loadListAnchors(force = false) {
+      if (listAnchorMode==="close" || !marketDiscoveryComplete || baselinePromise) return;
+      loadListPointCache();
+      const spec=getListAnchorSpec();
+      if(listAnchorSpec?.key!==spec.key) {listAnchorSpec=spec;listAnchorState=null;}
+      if(listAnchorState?.loading || (!force && Date.now()<(listAnchorState?.retryAt||0))) return;
+      const tasks=listAssets().map(item=>({item,times:listNeededTimes(item,spec).filter(t=>!Number.isFinite(listPoint(item,t)))})).filter(t=>t.times.length);
+      const cooling=Date.now()<listCooldownUntil;
+      const state=listAnchorState={key:spec.key,loading:!!tasks.length&&!cooling,retryAt:cooling?listCooldownUntil:Infinity,error:""};
+      renderListAnchorStatus();
+      if(!tasks.length || cooling) return;
+      let nextStart=Date.now();
+      await allSettledLimited(tasks,3,async({item,times})=>{
+        if(listAnchorMode==="close" || listAnchorSpec?.key!==spec.key || Date.now()<listCooldownUntil) return;
+        const startAt=Math.max(Date.now(),nextStart);nextStart=startAt+160;
+        await sleep(startAt-Date.now());
+        if(listAnchorMode==="close" || listAnchorSpec?.key!==spec.key || Date.now()<listCooldownUntil) return;
+        try { await fetchListPoints(item,times); }
+        catch(error) { if(listAnchorState===state) state.error=error.message.includes("429")?"Market-data rate limit; retry shortly.":"Some exact anchors are unavailable. Retry to request them again."; }
+        if(listAnchorState===state) {isDirty=true;flushUpdatesToDOM();}
+      });
+      state.loading=false;
+      state.retryAt=Date.now()+60000;
+      if(listAnchorState===state) {isDirty=true;flushUpdatesToDOM();}
+    }
+
     function formatVolume(val) {
       if (!val || isNaN(val)) return "$0";
       let num = parseFloat(val);
@@ -861,8 +1236,10 @@
         if (dot) dot.className = `dot ${cls}`;
         if (el && el.innerText !== txt) { el.className = `s-${cls}`; el.innerText = txt; }
         if (base) {
-          if (base.innerText !== baseTxt) base.innerText = baseTxt;
-          base.style.color = degraded > 0 ? "var(--warn)" : "var(--text-dim)";
+          const listOnly = sfx === "main" && listAnchorMode !== "close";
+          const value = listOnly ? `vs ${listAnchorSpec?.label || "selected anchor"} · list only` : baseTxt;
+          if (base.innerText !== value) base.innerText = value;
+          base.style.color = !listOnly && degraded > 0 ? "var(--warn)" : "var(--text-dim)";
         }
       }
       renderStartupStatus();
@@ -892,6 +1269,10 @@
           marketMap[key].elRet = document.getElementById(`ret-${key}`);
           marketMap[key].elOutperf = document.getElementById(`outperf-${key}`);
           marketMap[key].elAge = document.getElementById(`age-${key}`);
+          marketMap[key].elPinPx = document.getElementById(`pin-px-${key}`);
+          marketMap[key].elPinRet = document.getElementById(`pin-ret-${key}`);
+          marketMap[key].elPinOutperf = document.getElementById(`pin-outperf-${key}`);
+          marketMap[key].elPinAge = document.getElementById(`pin-age-${key}`);
         }
       }
     }
@@ -1253,6 +1634,7 @@
       ensureBaselineSession();
       if (marketDiscoveryComplete && !baselinePromise && Date.now() >= baselineRetryAt
           && selectedAssets().some(item => !hasVerifiedBaseline(item))) loadBaselines();
+      ensureListAnchor();
       renderStatus();
 
       for (const key of activeKeys) {
@@ -1269,53 +1651,11 @@
           let item = marketMap[key];
           if (!item || !item.elPx || !item.elRet) continue;
 
-          // Any pair target shows its de-levered return and its own basis, so the OUTPERF
-          // column carries every modelled leg rather than SOXL alone.
-          let retVal = item.rawPct;
-          let outperfVal = null;
-          let benchDead = false;
-          let pair = PAIRS[item.baseName.toUpperCase()];
-          if (pair) {
-            retVal = item.rawPct / pair.lev;
-            let bench = marketMap[pair.bench];
-            if (bench) {
-                outperfVal = retVal - (bench.rawPct / (pair.benchLev || 1) * effectiveBeta(pair));
-              // A basis is only as fresh as its stalest leg. The detail view already gates on
-              // both; without this the list would colour a confident basis off a dead hedge.
-              benchDead = ageOf(bench) > STALE_BAD_MS;
-            }
-          }
-
-          let pxStr = fmtPx(item.livePrice);
-          if (item.elPx.innerText !== `$${pxStr}`) item.elPx.innerText = `$${pxStr}`;
-
-          // a price nobody has quoted in minutes must not render as a live move
-          let age = ageOf(item);
-          let dead = age > STALE_BAD_MS;
-          if (item.elAge) {
-            let aStr = fmtAge(age);
-            if (item.elAge.innerText !== aStr) item.elAge.innerText = aStr;
-            let aCls = ageClass(age);
-            if (item.elAge.className !== aCls) item.elAge.className = aCls;
-          }
-
-          let rClass = !isFinite(retVal) || dead ? "neutral" : (retVal >= 0 ? "up" : "down");
-          let rSign = retVal >= 0 ? "+" : "";
-          let rStr = isFinite(retVal) ? `${rSign}${retVal.toFixed(2)}%` : "–";
-          if (item.elRet.innerText !== rStr || item.elRet.className !== `ret ${rClass}`) {
-            item.elRet.className = `ret ${rClass}`;
-            item.elRet.innerText = rStr;
-          }
-
-          if (item.elOutperf) {
-            if (outperfVal !== null) {
-              let oCls = !isFinite(outperfVal) || dead || benchDead ? "neutral" : (outperfVal >= 0 ? "up" : "down");
-              let oSign = outperfVal >= 0 ? "+" : "";
-              item.elOutperf.className = `outperf ${oCls}`;
-              item.elOutperf.innerText = isFinite(outperfVal) ? `${oSign}${outperfVal.toFixed(2)}%` : "–";
-            }
-          }
+          const values = listComparison(item);
+          paintListRow(item,values,"");
+          paintListRow(item,values,"Pin");
         }
+        renderListAnchorStatus();
       } 
       else if (currentView === "detail") {
         const pair = PAIRS[activePairKey];
@@ -2896,42 +3236,16 @@
           if (rowData.length === 0) continue;
           rowData.sort((a, b) => b.volume - a.volume);
           
-          mainHtml += `
-            <div class="group-header">
-              <div class="group-title">${group.name.toUpperCase()}</div>
-              <div class="col">PRICE</div>
-              <div class="col">1x RET</div>
-              <div class="col">OUTPERF</div>
-            </div>
-          `;
+          mainHtml += listColumnsHtml(group.name.toUpperCase());
           
           for (let item of rowData) {
-            // A pair target opens its own detail view; everything else links straight to HL.
-            let isPair = !!PAIRS[item.baseName.toUpperCase()];
-            let clickable = isPair && !item.placeholder && marketDiscoveryComplete;
-            let tag = isPair || item.placeholder ? "div" : "a";
-            let attrs = clickable
-              ? `onclick="openDetail('${item.baseName.toUpperCase()}', event)"`
-              : (!isPair && !item.placeholder ? `href="https://app.hyperliquid.xyz/trade/${item.fullName}" target="_blank"` : "");
-
-            mainHtml += `
-              <${tag} ${attrs} class="row">
-                <div class="ticker">
-                  <span class="ticker-name">${item.baseName}${clickable ? ' <span style="color: var(--accent)">›</span>' : ''}</span>
-                  <span class="ticker-vol">${item.placeholder
-                    ? (marketDiscoveryComplete ? "market unavailable" : "loading market…")
-                    : `${item.dex} · ${formatVolume(item.volume)} 24h · <span id="age-${item.baseName}">–</span>`}</span>
-                </div>
-                <div class="price" id="px-${item.baseName}">-</div>
-                <div class="ret" id="ret-${item.baseName}">-</div>
-                <div class="outperf" id="outperf-${item.baseName}">-</div>
-              </${tag}>
-            `;
+            mainHtml += dashboardRowHtml(item);
           }
         }
       }
       
       document.getElementById("content").innerHTML = mainHtml;
+      renderPinnedSymbols();
 
       // The heavyweights list is per-pair and built by openDetail(), not here.
       cacheDOMPointers();
